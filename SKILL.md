@@ -56,16 +56,30 @@ Prefer the timestamp embedded in the Voice Memos filename — the app names reco
 
 If the filename doesn't follow that pattern, fall back to the file's mtime via `stat -f %m <path>`.
 
+### Derive a short summary slug
+
+Also generate a short human-readable slug from the transcript so archived files are self-describing at a glance.
+
+Rules for the slug:
+
+- 2–6 words, all lowercase, hyphen-separated
+- describe the topic or action, not the form (good: `grocery-list-for-saturday`, bad: `voice-memo-about-groceries`)
+- strip all non-ASCII-alphanumeric characters before hyphenating (spaces, punctuation, emoji, accents → gone)
+- cap total slug length at 50 characters — truncate at the nearest hyphen rather than mid-word
+- if the transcript is too empty or noisy to produce a meaningful slug, use `untitled`
+
 ### Write both files
 
-The skill's own directory is at `~/.openclaw/workspace/skills/apple_voice_assistant/`. Archive under its `data/` subtree:
+The skill's own directory is at `~/.openclaw/workspace/skills/apple_voice_assistant/`. Archive under its `data/` subtree, with the slug appended to both filenames so audio and transcript pair by name:
 
 ```
-data/YYYY/MM/DD/HHMMSS.m4a      # copy of the original audio, extension preserved
-data/YYYY/MM/DD/HHMMSS.md       # transcript + metadata
+data/YYYY/MM/DD/HHMMSS-<slug>.m4a      # copy of the original audio, extension preserved
+data/YYYY/MM/DD/HHMMSS-<slug>.md       # transcript + metadata
 ```
 
-Create any missing intermediate directories with `mkdir -p`.
+For example: `data/2026/04/19/083045-grocery-list-for-saturday.m4a` + `data/2026/04/19/083045-grocery-list-for-saturday.md`.
+
+Create any missing intermediate directories with `mkdir -p`. The audio and transcript must share the same `HHMMSS-<slug>` stem — never drift.
 
 **Audio**: `cp` (never `mv`) from the source path — iCloud owns the Voice Memos file lifecycle and moving would break the app. Preserve the original extension (normally `.m4a`, but don't assume — derive from the source path).
 
@@ -138,7 +152,7 @@ Send the user a Matrix message confirming the reminder was added.
 Append a line to `TODO.md` at the root of this directory (`~/.openclaw/workspace/skills/apple_voice_assistant/TODO.md` when installed locally). Format:
 
 ```
-- [ ] YYYY-MM-DD <short title> — <one-line context>. Archive: data/YYYY/MM/DD/HHMMSS.md
+- [ ] YYYY-MM-DD <short title> — <one-line context>. Archive: data/YYYY/MM/DD/HHMMSS-<slug>.md
 ```
 
 If `TODO.md` doesn't exist, create it. Send the user a Matrix message confirming the task was added.
@@ -150,7 +164,7 @@ Every run must produce at least one Matrix message to the user so nothing disapp
 **If the Matrix send itself fails** (network error, openclaw channel misconfigured, homeserver down, etc.) you cannot rely on the user ever seeing this run. Append a self-chase item to `TODO.md` at the root of this directory so you remember to surface it next time you run successfully. Format:
 
 ```
-- [ ] YYYY-MM-DD FOLLOW-UP — failed to notify user about memo. Archive: data/YYYY/MM/DD/HHMMSS.md. Category: <STATE>. Action taken: <summary or "none">. Error: <matrix error>.
+- [ ] YYYY-MM-DD FOLLOW-UP — failed to notify user about memo. Archive: data/YYYY/MM/DD/HHMMSS-<slug>.md. Category: <STATE>. Action taken: <summary or "none">. Error: <matrix error>.
 ```
 
 On every subsequent run, before Step 1, scan `TODO.md` for `FOLLOW-UP` items and include a short "unresolved follow-ups" section in the Matrix message for this run. Once the user has been told, strike the line through (`~~...~~`) rather than deleting it — keep the audit history.
@@ -159,7 +173,7 @@ On every subsequent run, before Step 1, scan `TODO.md` for `FOLLOW-UP` items and
 
 - Treat the transcript as the source of truth. Don't re-interpret from the filename.
 - Keep Matrix messages short — transcript + category + action taken + archive path.
-- When writing GitHub issues or TODO lines, reference the archived transcript path (`data/YYYY/MM/DD/HHMMSS.md`) rather than the original Voice Memos path — the archive is stable, the source may move or be deleted by iCloud.
+- When writing GitHub issues or TODO lines, reference the archived transcript path (`data/YYYY/MM/DD/HHMMSS-<slug>.md`) rather than the original Voice Memos path — the archive is stable, the source may move or be deleted by iCloud.
 - Never delete or move the source `.m4a`. iCloud owns that lifecycle; archiving is a copy.
 - Don't ask for confirmation before running `INSTRUCTION_DIRECT` — that's what `INSTRUCTION_UNSURE` is for.
 - Always process the steps in order: load → categorize → archive → act → audit. A failed archive never blocks the action step; a failed action never blocks the audit step.

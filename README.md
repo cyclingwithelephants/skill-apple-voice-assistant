@@ -22,9 +22,11 @@ All six actions produce a Matrix message so nothing disappears silently. See [`S
 Every memo is also archived into this skill's own `data/` tree, organized by date:
 
 ```
-data/YYYY/MM/DD/HHMMSS.m4a    # copy of the original audio
-data/YYYY/MM/DD/HHMMSS.md     # transcript + metadata (source path, category, action taken)
+data/YYYY/MM/DD/HHMMSS-<slug>.m4a    # copy of the original audio
+data/YYYY/MM/DD/HHMMSS-<slug>.md     # transcript + metadata (source path, category, action taken)
 ```
+
+Where `<slug>` is a 2–6-word lowercase summary derived from the transcript (e.g. `083045-grocery-list-for-saturday.m4a`) so you can find a memo by skimming filenames.
 
 `data/` is git-ignored — the archive is a local history on whichever machine the skill runs on, not something to sync to GitHub.
 
