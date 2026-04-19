@@ -19,6 +19,15 @@ Each new `.m4a` in your Voice Memos iCloud sync dir is classified into one of si
 
 All six actions produce a Matrix message so nothing disappears silently. See [`SKILL.md`](SKILL.md) for the full classification rules.
 
+Every memo is also archived into this skill's own `data/` tree, organized by date:
+
+```
+data/YYYY/MM/DD/HHMMSS.m4a    # copy of the original audio
+data/YYYY/MM/DD/HHMMSS.md     # transcript + metadata (source path, category, action taken)
+```
+
+`data/` is git-ignored — the archive is a local history on whichever machine the skill runs on, not something to sync to GitHub.
+
 ## Architecture
 
 ```
