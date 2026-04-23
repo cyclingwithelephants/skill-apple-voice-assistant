@@ -81,8 +81,19 @@ launchctl bootstrap "${DOMAIN}" "${HEALTHCHECK_PLIST_DEST}"
 launchctl enable "${DOMAIN}/${HEALTHCHECK_LABEL}"
 say "Daily health check installed (runs at 09:00)"
 
-# 7. Seed the seen-set with basenames of existing memos (not full paths).
-if [[ ! -s "${STATE_DIR}/seen.txt" ]]; then
+# 7. Seed or migrate the seen-set to basenames.
+# Old installs stored full paths; new format uses basenames only.
+# Detect and migrate, or seed fresh if empty.
+if [[ -s "${STATE_DIR}/seen.txt" ]]; then
+  if head -1 "${STATE_DIR}/seen.txt" | grep -q '/'; then
+    say "Migrating seen-set from full paths to basenames..."
+    while IFS= read -r line; do
+      printf '%s\n' "${line##*/}"
+    done < "${STATE_DIR}/seen.txt" > "${STATE_DIR}/seen.txt.tmp"
+    mv "${STATE_DIR}/seen.txt.tmp" "${STATE_DIR}/seen.txt"
+    say "Migrated seen-set ($(wc -l < "${STATE_DIR}/seen.txt" | tr -d ' ') entries)"
+  fi
+else
   find "${RECORDINGS_DIR}" -maxdepth 1 -name '*.m4a' -type f -exec basename {} \; > "${STATE_DIR}/seen.txt" || true
   say "Seeded seen-set with existing memos ($(wc -l < "${STATE_DIR}/seen.txt" | tr -d ' ') files)"
 fi
