@@ -17,13 +17,7 @@ die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 # --- Validate prerequisites ---
 command -v openclaw >/dev/null || die "openclaw not on PATH — install it first (see https://openclaw.ai)"
-command -v gh >/dev/null       || die "gh (GitHub CLI) not on PATH — install it first (brew install gh)"
 command -v osascript >/dev/null || die "osascript not found — this skill requires macOS"
-
-# Check gh auth
-if ! gh auth status &>/dev/null; then
-  die "gh is not authenticated — run 'gh auth login' first (needs 'repo' scope)"
-fi
 
 # 1. Resolve the Voice Memos recordings dir.
 for candidate in \

@@ -10,45 +10,52 @@ Carry out the instruction using your normal tool set (bash, read/write, etc.). W
 
 ## `INSTRUCTION_ADD`
 
-Open a GitHub issue on `cyclingwithelephants/skill-apple-voice-assistant` capturing the proposed rule/example. Use `gh issue create` with:
+The user is proposing a new rule, pattern, or example for this skill. Persist the proposal somewhere the user will review it later. The goal is a durable, reviewable record — not a specific tool or platform.
 
-- **title**: one-line summary of the rule (prefix `instruction: `)
-- **body**: full transcript, your interpretation of what the rule means, a suggested patch snippet showing the proposed edit (not just a location reference), and the archived transcript path from Step 4
+Preferred methods, in order of availability:
 
-Before creating, check for existing open issues with similar titles (`gh issue list -s open --search "<keywords>"`) to avoid duplicates.
+1. **Append to `PROPOSALS.md`** at the root of this skill's directory (always available, no external dependencies)
+2. **Send the user a message** via the audit channel with the full proposal (as a fallback or supplement)
 
-Send the user a short audit message confirming the issue URL.
+Each proposal entry should include:
+
+- **title**: one-line summary of the rule
+- **transcript**: the full memo transcript
+- **interpretation**: your understanding of what the rule means
+- **suggested change**: a concrete patch or example to add (not just a location reference), targeting `SKILL.md` or `references/classification-examples.md`
+- **archive link**: path to the archived transcript from Step 4
+
+Format for `PROPOSALS.md`:
+
+```markdown
+## YYYY-MM-DD — <title>
+
+**Transcript**: <full transcript>
+
+**Interpretation**: <what the rule means>
+
+**Suggested change**:
+<concrete patch or new example row>
+
+**Archive**: data/YYYY/MM/DD/HH-MM-SS-<slug>.md
+**Status**: pending
+```
+
+Before appending, scan existing entries in `PROPOSALS.md` for duplicates (similar title or transcript). If a near-duplicate exists, append a note to the existing entry rather than creating a new one.
+
+Send the user an audit message confirming the proposal was recorded.
 
 ## `INSTRUCTION_UNSURE`
 
 Do two things:
 
 1. Send a message quoting the transcript and asking the user to confirm the intended action. Offer the best-guess interpretation.
-2. Follow the `INSTRUCTION_ADD` action to file a GitHub issue proposing an example that would have disambiguated this memo — so next time a similar phrasing lands, you'd classify it confidently. Use the normalized template:
+2. Follow the `INSTRUCTION_ADD` action to record a proposal for a disambiguating example — so next time a similar phrasing lands, you'd classify it confidently. The proposal should include:
 
-```markdown
-## Type
-
-Edge case / disambiguating example
-
-## Transcript
-
-<full transcript>
-
-## Proposed classification
-
-<your best guess state> (confidence: <level>)
-
-## Suggested example for references/classification-examples.md
-
-| "<key phrase>" | `<STATE>` | <confidence> | <reasoning> |
-
-## Context
-
-<why this was ambiguous, what would make it clear>
-```
-
-Reference the audit message in the issue.
+- The full transcript
+- Your best-guess classification and confidence
+- A suggested example row for `references/classification-examples.md`
+- Why this was ambiguous and what would make it clear
 
 ## `TODO_ADAM`
 
