@@ -63,6 +63,7 @@ classify (+ confidence) → dedup check → archive → act → audit
 ## Prerequisites
 
 - macOS (tested on Apple Silicon; should work on Intel)
+- GNU coreutils (`brew install coreutils`) — provides `timeout(1)` used by the watcher
 - [openclaw](https://openclaw.ai) installed and onboarded (`openclaw onboard`)
 - Messaging channel configured in openclaw (`openclaw channels add`) — the skill reports back via your primary channel
 - Voice Memos signed into the same iCloud account as your iPhone, with iCloud sync enabled (System Settings → Apple ID → iCloud → Voice Memos)
