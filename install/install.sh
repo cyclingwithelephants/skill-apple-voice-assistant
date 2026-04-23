@@ -18,6 +18,7 @@ die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 # --- Validate prerequisites ---
 command -v openclaw >/dev/null || die "openclaw not on PATH — install it first (see https://openclaw.ai)"
 command -v osascript >/dev/null || die "osascript not found — this skill requires macOS"
+command -v timeout >/dev/null || die "timeout(1) not found — install coreutils: brew install coreutils"
 
 # 1. Resolve the Voice Memos recordings dir.
 for candidate in \
