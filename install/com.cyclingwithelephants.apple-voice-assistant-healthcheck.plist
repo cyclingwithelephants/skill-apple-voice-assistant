@@ -3,26 +3,26 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.cyclingwithelephants.apple-voice-assistant</string>
+    <string>com.cyclingwithelephants.apple-voice-assistant-healthcheck</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>__WATCHER_SCRIPT__</string>
+        <string>__HEALTHCHECK_SCRIPT__</string>
     </array>
 
-    <key>WatchPaths</key>
-    <array>
-        <string>__RECORDINGS_DIR__</string>
-    </array>
-
-    <key>ThrottleInterval</key>
-    <integer>10</integer>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
 
     <key>StandardOutPath</key>
-    <string>__STATE_DIR__/launchd.out.log</string>
+    <string>__STATE_DIR__/healthcheck.out.log</string>
 
     <key>StandardErrorPath</key>
-    <string>__STATE_DIR__/launchd.err.log</string>
+    <string>__STATE_DIR__/healthcheck.err.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>
