@@ -15,7 +15,15 @@ PLIST_DEST="${LAUNCH_AGENTS_DIR}/${LABEL}.plist"
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# --- Validate prerequisites ---
 command -v openclaw >/dev/null || die "openclaw not on PATH — install it first (see https://openclaw.ai)"
+command -v gh >/dev/null       || die "gh (GitHub CLI) not on PATH — install it first (brew install gh)"
+command -v osascript >/dev/null || die "osascript not found — this skill requires macOS"
+
+# Check gh auth
+if ! gh auth status &>/dev/null; then
+  die "gh is not authenticated — run 'gh auth login' first (needs 'repo' scope)"
+fi
 
 # 1. Resolve the Voice Memos recordings dir.
 for candidate in \
@@ -41,7 +49,7 @@ ln -s "${REPO_DIR}" "${SKILL_DIR}"
 say "Linked skill: ${SKILL_DIR} -> ${REPO_DIR}"
 
 # 3. Prepare state dir.
-mkdir -p "${STATE_DIR}"
+mkdir -p "${STATE_DIR}" "${STATE_DIR}/processed"
 touch "${STATE_DIR}/seen.txt" "${STATE_DIR}/watcher.log"
 
 # 4. Render the launchd plist with absolute paths.
@@ -61,12 +69,28 @@ DOMAIN="gui/$(id -u)"
 launchctl bootout "${DOMAIN}" "${PLIST_DEST}" 2>/dev/null || true
 launchctl bootstrap "${DOMAIN}" "${PLIST_DEST}"
 launchctl enable "${DOMAIN}/${LABEL}"
-say "launchd job bootstrapped and enabled"
+say "launchd watcher bootstrapped and enabled"
 
-# 6. Seed the seen-set with anything already in the dir so we don't reprocess history.
+# 6. Install daily health check.
+HEALTHCHECK_LABEL="${LABEL}-healthcheck"
+HEALTHCHECK_SCRIPT="${REPO_DIR}/install/healthcheck.sh"
+HEALTHCHECK_PLIST_DEST="${LAUNCH_AGENTS_DIR}/${HEALTHCHECK_LABEL}.plist"
+chmod +x "${HEALTHCHECK_SCRIPT}"
+
+sed \
+  -e "s|__HEALTHCHECK_SCRIPT__|${HEALTHCHECK_SCRIPT}|g" \
+  -e "s|__STATE_DIR__|${STATE_DIR}|g" \
+  "${REPO_DIR}/install/${HEALTHCHECK_LABEL}.plist" > "${HEALTHCHECK_PLIST_DEST}"
+
+launchctl bootout "${DOMAIN}" "${HEALTHCHECK_PLIST_DEST}" 2>/dev/null || true
+launchctl bootstrap "${DOMAIN}" "${HEALTHCHECK_PLIST_DEST}"
+launchctl enable "${DOMAIN}/${HEALTHCHECK_LABEL}"
+say "Daily health check installed (runs at 09:00)"
+
+# 7. Seed the seen-set with basenames of existing memos (not full paths).
 if [[ ! -s "${STATE_DIR}/seen.txt" ]]; then
-  find "${RECORDINGS_DIR}" -maxdepth 1 -name '*.m4a' -type f > "${STATE_DIR}/seen.txt" || true
-  say "Seeded seen-set with existing memos"
+  find "${RECORDINGS_DIR}" -maxdepth 1 -name '*.m4a' -type f -exec basename {} \; > "${STATE_DIR}/seen.txt" || true
+  say "Seeded seen-set with existing memos ($(wc -l < "${STATE_DIR}/seen.txt" | tr -d ' ') files)"
 fi
 
 cat <<EOF
@@ -88,7 +112,8 @@ You can tail the watcher log to confirm:
 To uninstall:
 
   launchctl bootout ${DOMAIN} ${PLIST_DEST}
-  rm "${PLIST_DEST}"
+  launchctl bootout ${DOMAIN} ${HEALTHCHECK_PLIST_DEST}
+  rm "${PLIST_DEST}" "${HEALTHCHECK_PLIST_DEST}"
   rm "${SKILL_DIR}"
 
 EOF

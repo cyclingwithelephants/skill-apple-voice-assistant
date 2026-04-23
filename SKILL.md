@@ -1,14 +1,7 @@
 ---
-name: apple_voice_assistant
-description: Process an iPhone voice memo — categorize its intent (instruction, todo, new rule, unknown) and take the appropriate action. Triggered when a new Apple Voice Memo lands on the Mac mini via iCloud sync.
+name: apple-voice-assistant
+description: Process an iPhone voice memo — classify intent, act on it, archive, and report back.
 homepage: https://github.com/cyclingwithelephants/skill-apple-voice-assistant
-metadata:
-  openclaw:
-    os: darwin
-    requires:
-      bins:
-        - gh
-        - osascript
 ---
 
 # Apple Voice Assistant
@@ -21,7 +14,7 @@ You process iPhone voice memos on behalf of the user (Adam, GitHub `cyclingwithe
 
 Extract the absolute path from the triggering message (e.g. `/Users/adam/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/20260419 083045.m4a`).
 
-Explicitly read the file and attach it to the conversation so your native audio transcription runs over it. Do not assume the audio is already loaded — call your `read` tool on the path first, then rely on the resulting `{{Transcript}}` variable / `[Audio]` block for the memo body.
+Explicitly read the file and attach it to the conversation so your native audio transcription runs over it. Do not assume the audio is already loaded — call your `read` tool on the path first, then rely on the resulting transcript for the memo body.
 
 Validate before proceeding:
 
@@ -29,151 +22,116 @@ Validate before proceeding:
 - file ends in `.m4a` (skip `.icloud` placeholders — they mean iCloud hasn't finished syncing yet; if you see one, log and stop, the launchd watcher will retry on the next change)
 - transcript is non-empty
 
-If any check fails, send the user a Matrix message explaining the problem and stop.
+If any check fails, send the user a message explaining the problem and stop.
 
-## Step 2 — Categorize the transcript
+## Step 2 — Classify the transcript
 
-Classify into exactly one state:
+Assign exactly one **state** and one **confidence level**.
+
+### States
 
 | State                | Meaning                                                                                                         |
 | -------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `UNKNOWN`            | No clear intent — doesn't match any other state                                                                 |
-| `INSTRUCTION_ADD`    | User is teaching a new rule, pattern, or example for this skill itself                                          |
 | `INSTRUCTION_DIRECT` | A direct instruction for you to carry out now                                                                   |
+| `INSTRUCTION_ADD`    | User is teaching a new rule, pattern, or example for this skill itself                                          |
 | `INSTRUCTION_UNSURE` | Sounds like a direct instruction but you're not confident — ambiguous scope, missing context, or novel phrasing |
 | `TODO_ADAM`          | A task the user wants to do themselves later                                                                    |
 | `TODO_ASSISTANT`     | A task the user wants you to do later (not now)                                                                 |
+| `MEMORY_NOTE`        | A fact to persist — about a person, project, system, or preference                                              |
+| `JOURNAL_NOTE`       | Raw thoughts, reflections, life log — no action needed beyond archiving                                         |
+| `IDEA_CAPTURE`       | A product, project, or creative idea to capture for later                                                       |
+| `RESEARCH_REQUEST`   | "Look into X" — create a research task, do NOT act immediately                                                  |
+| `MESSAGE_DRAFT`      | "Send/tell/reply to Y" — draft a message, never send without explicit confirmation                              |
+| `TRANSCRIBE_ONLY`    | User explicitly says "just save this" or similar — archive only, no action                                      |
+| `UNKNOWN`            | No clear intent — doesn't match any other state                                                                 |
 
-Bias toward `INSTRUCTION_UNSURE` over `INSTRUCTION_DIRECT` when in doubt — it's cheaper to ask than to act wrongly. Bias toward `TODO_ADAM` over `TODO_ASSISTANT` when the actor is unclear — Adam defaults to owning his own work.
+`UNKNOWN` is the **classification training pipeline**. Its purpose is to collect memos that don't fit existing states so patterns can be discovered over time and new states or rules proposed. It is not a generic fallback bin — classify into a specific state whenever possible, and only use `UNKNOWN` when the memo genuinely doesn't match anything above.
 
-## Step 3 — Archive the audio and transcript
+### Classification biases
 
-Copy the raw audio and write a matching transcript file into this skill's own `data/` tree, organized by date. This gives a durable, greppable history independent of Voice Memos / iCloud and survives any upstream deletion.
+- Prefer `INSTRUCTION_UNSURE` over `INSTRUCTION_DIRECT` when in doubt — cheaper to ask than to act wrongly.
+- Prefer `TODO_ADAM` over `TODO_ASSISTANT` when the actor is unclear — Adam defaults to owning his own work.
+- Prefer `MEMORY_NOTE` over `JOURNAL_NOTE` when the memo contains a concrete fact, even if it's embedded in a reflection.
+- Prefer a specific state over `UNKNOWN` — `UNKNOWN` is for genuinely unclassifiable memos, not "I'm not sure."
 
-### Derive the timestamp
+See [`references/classification-examples.md`](references/classification-examples.md) for worked examples covering common and edge-case phrasings.
 
-Prefer the timestamp embedded in the Voice Memos filename — the app names recordings like `YYYYMMDD HHMMSS.m4a` (e.g. `20260419 083045.m4a`). Parse out year, month, day, hour, minute, and second components from the filename, then format as `YYYY/MM/DD` for the directory path and `HH-MM-SS` for the filename prefix.
+### Confidence
 
-If the filename doesn't follow that pattern, fall back to the file's mtime via `stat -f %m <path>`.
+Rate your classification confidence as `high`, `medium`, or `low`.
 
-### Derive a short summary slug
+| Confidence | Meaning                                               | Constraint                                                                                                                                                               |
+| ---------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `high`     | Clear intent, unambiguous phrasing                    | No restrictions                                                                                                                                                          |
+| `medium`   | Likely correct but some ambiguity                     | Proceed, but note uncertainty in audit message                                                                                                                           |
+| `low`      | Guessing — transcript is noisy, garbled, or ambiguous | **Never perform external or irreversible actions.** Escalate to draft/confirm. Treat as `INSTRUCTION_UNSURE` if it looked like an instruction, or archive-only otherwise |
 
-Also generate a short human-readable slug from the transcript so archived files are self-describing at a glance.
+Voice-to-text errors are common. A misheard word can completely change intent. When confidence is low, the cost of asking is always lower than the cost of acting wrongly.
 
-Rules for the slug:
+## Step 3 — Check for duplicates
 
-- 2–6 words, all lowercase, hyphen-separated
-- describe the topic or action, not the form (good: `grocery-list-for-saturday`, bad: `voice-memo-about-groceries`)
-- strip all non-ASCII-alphanumeric characters before hyphenating (spaces, punctuation, emoji, accents → gone)
-- cap total slug length at 50 characters — truncate at the nearest hyphen rather than mid-word
-- if the transcript is too empty or noisy to produce a meaningful slug, use `untitled`
-
-### Write both files
-
-The skill's own directory is at `~/.openclaw/workspace/skills/apple_voice_assistant/`. Archive under its `data/` subtree, with the slug appended to both filenames so audio and transcript pair by name:
-
-```
-data/YYYY/MM/DD/HH-MM-SS-<slug>.m4a      # copy of the original audio, extension preserved
-data/YYYY/MM/DD/HH-MM-SS-<slug>.md       # transcript + metadata
-```
-
-For example: `data/2026/04/19/08-30-45-grocery-list-for-saturday.m4a` + `data/2026/04/19/08-30-45-grocery-list-for-saturday.md`.
-
-Create any missing intermediate directories with `mkdir -p`. The audio and transcript must share the same `HH-MM-SS-<slug>` stem — never drift.
-
-**Audio**: `cp` (never `mv`) from the source path — iCloud owns the Voice Memos file lifecycle and moving would break the app. Preserve the original extension (normally `.m4a`, but don't assume — derive from the source path).
-
-**Transcript**: a Markdown file with YAML frontmatter followed by the full transcript body. Use this structure:
-
-```markdown
----
-source_path: /Users/adam/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/20260419 083045.m4a
-recorded_at: 2026-04-19T08:30:45Z
-archived_at: 2026-04-19T08:31:02Z
-duration_seconds: 47
-category: INSTRUCTION_UNSURE
-action_taken: filed GitHub issue #12 + Matrix message
----
-
-<full transcript verbatim>
-```
-
-Include whichever frontmatter fields you have information for — `duration_seconds` is optional, `source_path` / `recorded_at` / `archived_at` / `category` are required. `action_taken` is filled in after Step 4 completes (either update the file or append it at the end; updating is fine).
-
-### If archiving fails
-
-If the `cp` or transcript write fails (disk full, permission denied, etc.), log it and continue to Step 4 anyway — the action the user intended should still happen. Include the failure in the Matrix audit message.
-
-## Step 4 — Act on the category
-
-### `UNKNOWN`
-
-Send the user a Matrix message containing the full transcript and ask how to categorize it. Do nothing else.
-
-### `INSTRUCTION_ADD`
-
-Open a GitHub issue on `cyclingwithelephants/skill-apple-voice-assistant` capturing the proposed rule/example. Use `gh issue create` with:
-
-- title: one-line summary of the rule (prefix `instruction: `)
-- body: full transcript + your interpretation of what the rule means + suggested edit location in `SKILL.md` + a reference to the archived transcript path from Step 3
-
-Send the user a short Matrix message confirming the issue URL.
-
-### `INSTRUCTION_DIRECT`
-
-Carry out the instruction using your normal tool set (bash, browser, read/write, etc.). When finished — or if you hit a blocker — send a Matrix message reporting what you did and any result/output.
-
-### `INSTRUCTION_UNSURE`
-
-Do two things:
-
-1. Send a Matrix message quoting the transcript and asking the user to confirm the intended action. Offer the best-guess interpretation.
-2. Follow the `INSTRUCTION_ADD` action to file a GitHub issue proposing an example that would have disambiguated this memo — so next time a similar phrasing lands, you'd classify it confidently. Reference the Matrix message in the issue.
-
-### `TODO_ADAM`
-
-Create an Apple Reminder in the user's default Reminders list (the list Siri uses by default — don't specify a list name). Use `osascript` with AppleScript:
-
-```applescript
-tell application "Reminders"
-  set newReminder to make new reminder with properties {name:"<short title>", body:"<context/notes>"}
-end tell
-```
-
-Where:
-
-- `name`: a concise imperative title derived from the transcript
-- `body`: any useful context from the memo (who, when, why) — include the full transcript at the bottom so nothing is lost
-
-Send the user a Matrix message confirming the reminder was added.
-
-### `TODO_ASSISTANT`
-
-Append a line to `TODO.md` at the root of this directory (`~/.openclaw/workspace/skills/apple_voice_assistant/TODO.md` when installed locally). Format:
+Before archiving or acting, check whether this memo has already been processed. The watcher writes an idempotency record for each processed memo at:
 
 ```
-- [ ] YYYY-MM-DD <short title> — <one-line context>. Archive: data/YYYY/MM/DD/HH-MM-SS-<slug>.md
+~/.local/state/apple-voice-assistant/processed/<memo_id>.json
 ```
 
-If `TODO.md` doesn't exist, create it. Send the user a Matrix message confirming the task was added.
+Where `<memo_id>` is derived from the source filename (basename without extension). If a record already exists with the same `source_mtime` and `source_size_bytes`, skip this memo — it's a duplicate triggered by iCloud sync churn.
 
-## Step 5 — Always leave an audit trail
+If no record exists, create one after Step 5 completes:
 
-Every run must produce at least one Matrix message to the user so nothing disappears silently. If an action fails (e.g. `gh` not authed, Reminders permission denied, archive write failed), send a Matrix message with the error and the raw transcript.
+```json
+{
+  "memo_id": "20260419 083045",
+  "source_filename": "20260419 083045.m4a",
+  "source_mtime": 1745053845,
+  "source_size_bytes": 234567,
+  "category": "TODO_ADAM",
+  "confidence": "high",
+  "archive_path": "data/2026/04/19/08-30-45-grocery-list-for-saturday.md",
+  "disposition": "created Apple Reminder",
+  "processed_at": "2026-04-19T08:31:02Z"
+}
+```
 
-**If the Matrix send itself fails** (network error, openclaw channel misconfigured, homeserver down, etc.) you cannot rely on the user ever seeing this run. Append a self-chase item to `TODO.md` at the root of this directory so you remember to surface it next time you run successfully. Format:
+## Step 4 — Archive the audio and transcript
+
+Copy the raw audio and write a matching transcript file into this skill's `data/` tree. This gives a durable, greppable history independent of Voice Memos / iCloud.
+
+See [`references/archive-format.md`](references/archive-format.md) for the full archive specification (directory layout, slug rules, transcript frontmatter fields, failure handling).
+
+## Step 5 — Act on the category
+
+Each state maps to a specific action. See [`references/actions.md`](references/actions.md) for the full action specification.
+
+### Safety rules (apply to ALL states)
+
+1. **Never send, post, or publish externally without confirmation.** Any action that sends a message to another person, creates a public GitHub issue outside this repo, posts to a channel, or emails — default to **draft + confirm**. This applies to `MESSAGE_DRAFT` by definition, but also to any `INSTRUCTION_DIRECT` that involves external communication. Voice memos are too easy to underspecify.
+
+2. **Low confidence = no irreversible actions.** If confidence is `low`, do not execute instructions, create external resources, or send messages. Archive the transcript and ask the user for clarification.
+
+3. **Never delete or move the source `.m4a`.** iCloud owns that lifecycle; archiving is always a copy.
+
+## Step 6 — Audit trail
+
+Every run must produce at least one message to the user so nothing disappears silently. Use whatever messaging channel the runtime provides (e.g. the primary notification channel configured in the host). Do not hardcode a specific channel.
+
+The audit message should include: transcript summary, category, confidence, action taken, and archive path.
+
+If an action fails (e.g. `gh` not authed, Reminders permission denied, archive write failed), send a message with the error and the raw transcript.
+
+**If the message send itself fails** (network error, channel misconfigured, etc.), append a self-chase item to `TODO.md` at the root of this skill's directory:
 
 ```
-- [ ] YYYY-MM-DD FOLLOW-UP — failed to notify user about memo. Archive: data/YYYY/MM/DD/HH-MM-SS-<slug>.md. Category: <STATE>. Action taken: <summary or "none">. Error: <matrix error>.
+- [ ] YYYY-MM-DD FOLLOW-UP — failed to notify user about memo. Archive: data/YYYY/MM/DD/HH-MM-SS-<slug>.md. Category: <STATE>. Confidence: <level>. Action taken: <summary or "none">. Error: <error>.
 ```
 
-On every subsequent run, before Step 1, scan `TODO.md` for `FOLLOW-UP` items and include a short "unresolved follow-ups" section in the Matrix message for this run. Once the user has been told, strike the line through (`~~...~~`) rather than deleting it — keep the audit history.
+On every subsequent run, before Step 1, scan `TODO.md` for `FOLLOW-UP` items and include an "unresolved follow-ups" section in the audit message. Once the user has been told, strike the line through (`~~...~~`) rather than deleting it — keep the audit history.
 
-## Guidance for yourself
+## Guidance
 
 - Treat the transcript as the source of truth. Don't re-interpret from the filename.
-- Keep Matrix messages short — transcript + category + action taken + archive path.
+- Keep audit messages short — transcript summary + category + confidence + action taken + archive path.
 - When writing GitHub issues or TODO lines, reference the archived transcript path (`data/YYYY/MM/DD/HH-MM-SS-<slug>.md`) rather than the original Voice Memos path — the archive is stable, the source may move or be deleted by iCloud.
-- Never delete or move the source `.m4a`. iCloud owns that lifecycle; archiving is a copy.
-- Don't ask for confirmation before running `INSTRUCTION_DIRECT` — that's what `INSTRUCTION_UNSURE` is for.
-- Always process the steps in order: load → categorize → archive → act → audit. A failed archive never blocks the action step; a failed action never blocks the audit step.
+- Don't ask for confirmation before running `INSTRUCTION_DIRECT` (that's what `INSTRUCTION_UNSURE` is for) — **unless** it involves external communication (see Safety rule 1).
+- Always process the steps in order: load → classify → dedup → archive → act → audit. A failed archive never blocks the action step; a failed action never blocks the audit step.
