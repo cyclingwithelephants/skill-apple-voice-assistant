@@ -116,8 +116,8 @@ You can tail the watcher log to confirm:
 
 To uninstall:
 
-  launchctl bootout ${DOMAIN} ${PLIST_DEST}
-  launchctl bootout ${DOMAIN} ${HEALTHCHECK_PLIST_DEST}
+  launchctl bootout "${DOMAIN}" "${PLIST_DEST}"
+  launchctl bootout "${DOMAIN}" "${HEALTHCHECK_PLIST_DEST}"
   rm "${PLIST_DEST}" "${HEALTHCHECK_PLIST_DEST}"
   rm "${SKILL_DIR}"
 

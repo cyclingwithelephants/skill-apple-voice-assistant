@@ -2,6 +2,11 @@
 # Fires on every change to the Voice Memos iCloud sync dir.
 # Finds new .m4a files (vs. a seen-set of basenames) and hands each one to openclaw.
 # Serialized via mkdir-based lock. Validates file stability before processing.
+#
+# Note: new memos are processed sequentially — each openclaw call can take up to
+# OPENCLAW_TIMEOUT seconds. With multiple new memos this adds up (e.g. 3 memos =
+# up to 15 minutes). This is intentional: serial processing is simpler to reason
+# about for a system that creates reminders, writes to files, and sends messages.
 
 set -euo pipefail
 
@@ -73,38 +78,36 @@ if command -v brctl >/dev/null 2>&1; then
   done
 fi
 
-# --- Batch file stability check ---
-# Snapshot sizes for all .m4a files, sleep once, then recheck.
-# Files whose size changed are still syncing and will be skipped.
-declare -A file_sizes
+# --- Collect unseen files and check stability as a batch ---
+# Only snapshot files not already in the seen-set. Typically 0-2 new files per run,
+# so this avoids stat-ing hundreds of historical memos.
+declare -a new_memos=()
+declare -A new_sizes=()
+
 for memo in "${RECORDINGS_DIR}"/*.m4a; do
   [[ -f "${memo}" ]] || continue
-  file_sizes["${memo}"]=$(stat -f%z "${memo}" 2>/dev/null || echo -1)
+  memo_basename="${memo##*/}"
+  if ! /usr/bin/grep -Fxq "${memo_basename}" "${SEEN_FILE}" 2>/dev/null; then
+    if [[ -s "${memo}" ]]; then
+      new_memos+=("${memo}")
+      new_sizes["${memo}"]=$(stat -f%z "${memo}" 2>/dev/null || echo -1)
+    else
+      log "skipping empty file: ${memo_basename}"
+    fi
+  fi
 done
 
-if (( ${#file_sizes[@]} > 0 )); then
+# Single sleep for the whole batch, only if there are new files
+if (( ${#new_memos[@]} > 0 )); then
   sleep 2
 fi
 
 # --- Process new .m4a files ---
-for memo in "${RECORDINGS_DIR}"/*.m4a; do
-  [[ -f "${memo}" ]] || continue
-
+for memo in "${new_memos[@]}"; do
   memo_basename="${memo##*/}"
 
-  # Check against seen-set (basenames only)
-  if /usr/bin/grep -Fxq "${memo_basename}" "${SEEN_FILE}" 2>/dev/null; then
-    continue
-  fi
-
-  # Skip empty or partial files
-  if [[ ! -s "${memo}" ]]; then
-    log "skipping empty file: ${memo_basename}"
-    continue
-  fi
-
-  # Check file stability from batch snapshot
-  size_before="${file_sizes["${memo}"]:-0}"
+  # Check file stability: size must match pre-sleep snapshot
+  size_before="${new_sizes["${memo}"]:-0}"
   size_now=$(stat -f%z "${memo}" 2>/dev/null || echo -1)
   if [[ "${size_before}" != "${size_now}" ]]; then
     log "file still syncing (size changed ${size_before} -> ${size_now}): ${memo_basename}"
@@ -132,6 +135,9 @@ for memo in "${RECORDINGS_DIR}"/*.m4a; do
   printf '%s\n' "${memo_basename}" >> "${SEEN_FILE}"
 
   # Hand off to openclaw with a PID-targeted timeout.
+  # Note: timer kill targets the specific openclaw PID. On SIGTERM (exit 143),
+  # the || true on kill absorbs errors if the timer already exited. Theoretical
+  # PID recycling risk is accepted (macOS 99999 PID space makes collision negligible).
   /usr/bin/env openclaw agent \
     --message "new voice memo at ${memo}" \
     >> "${LOG_FILE}" 2>&1 &
