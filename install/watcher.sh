@@ -18,6 +18,12 @@ PROCESSED_DIR="${STATE_DIR}/processed"
 MAX_LOG_BYTES=$((10 * 1024 * 1024))  # 10 MB
 OPENCLAW_TIMEOUT=300                   # 5 minutes
 
+# Require timeout(1) from coreutils (Homebrew: `brew install coreutils`).
+if ! command -v timeout >/dev/null 2>&1; then
+  echo "ERROR: timeout(1) not found. Install coreutils: brew install coreutils" >&2
+  exit 1
+fi
+
 mkdir -p "${STATE_DIR}" "${PROCESSED_DIR}"
 touch "${SEEN_FILE}" "${LOG_FILE}"
 
@@ -134,21 +140,13 @@ for memo in "${new_memos[@]}"; do
   # Record in seen-set (basename only, for consistent matching)
   printf '%s\n' "${memo_basename}" >> "${SEEN_FILE}"
 
-  # Hand off to openclaw with a PID-targeted timeout.
-  # Note: timer kill targets the specific openclaw PID. On SIGTERM (exit 143),
-  # the || true on kill absorbs errors if the timer already exited. Theoretical
-  # PID recycling risk is accepted (macOS 99999 PID space makes collision negligible).
-  /usr/bin/env openclaw agent \
-    --message "new voice memo at ${memo}" \
-    >> "${LOG_FILE}" 2>&1 &
-  oclaw_pid=$!
-  ( sleep "${OPENCLAW_TIMEOUT}"; kill "${oclaw_pid}" 2>/dev/null ) &
-  timer_pid=$!
-  if ! wait "${oclaw_pid}" 2>/dev/null; then
+  # Hand off to openclaw with a timeout.
+  if ! timeout "${OPENCLAW_TIMEOUT}" \
+    /usr/bin/env openclaw agent \
+      --message "new voice memo at ${memo}" \
+      >> "${LOG_FILE}" 2>&1; then
     log "ERROR: openclaw invocation failed or timed out for ${memo_basename}"
   fi
-  kill "${timer_pid}" 2>/dev/null || true
-  wait "${timer_pid}" 2>/dev/null || true
 done
 
 # --- Heartbeat: always touch the log so healthcheck knows we ran ---
