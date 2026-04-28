@@ -5,6 +5,9 @@
 
 set -euo pipefail
 
+export HOME="${HOME:-/Users/adam}"
+export PATH="/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
 STATE_DIR="${HOME}/.local/state/apple-voice-assistant"
 LOG_FILE="${STATE_DIR}/watcher.log"
 ALERT_FILE="${STATE_DIR}/healthcheck.alert"

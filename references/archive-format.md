@@ -4,7 +4,7 @@ Specification for Step 4 of the skill — archiving audio and transcripts.
 
 ## Directory layout
 
-The skill's own directory is at `~/.openclaw/workspace/skills/apple_voice_assistant/` (when installed via symlink). Archive under its `data/` subtree:
+The skill's own directory is the active Hermes workspace's symlinked skill path, typically `${HERMES_HOME:-$HOME/.hermes}/skills/apple/apple-voice-assistant/`. Archive under its `data/` subtree:
 
 ```
 data/YYYY/MM/DD/HH-MM-SS-<slug>.m4a      # copy of the original audio

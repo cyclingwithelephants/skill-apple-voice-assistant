@@ -10,16 +10,45 @@ You process iPhone voice memos on behalf of the user (Adam, GitHub `cyclingwithe
 
 > new voice memo at `/absolute/path/to/recording.m4a`
 
+## Step 0 — Watcher/TCC handling on macOS/Nix
+
+The launchd watcher may run without the same TCC privacy grant as an interactive shell. On Adam's Mac/Nix setup, bash globbing, `ls`, and other shell reads of the Voice Memos container can fail even after Python has been granted Full Disk Access / Files & Folders access.
+
+Use the Hermes venv Python explicitly for watcher-side discovery/copy work:
+
+```bash
+/Users/adam/.hermes/hermes-agent/venv/bin/python
+```
+
+Preferred watcher pattern:
+
+1. Use Python to enumerate `/Users/adam/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings`.
+2. Skip directories and `.icloud` placeholders.
+3. Copy the source audio into an unprotected staging directory before invoking shell tools:
+   ```text
+   ~/.local/state/apple-voice-assistant/tmp-audio/
+   ```
+4. Process the staged copy, not the protected Voice Memos path.
+5. Voice Memos may surface new recordings as `.qta`; convert/archive them as normal audio before transcription (the existing watcher has handled `.qta -> .m4a`).
+
 ## Step 1 — Load the audio
 
-Extract the absolute path from the triggering message (e.g. `/Users/adam/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/20260419 083045.m4a`).
+Extract the absolute path from the triggering message (e.g. `/Users/adam/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/20260419 083045.m4a` or a staged copy under `~/.local/state/apple-voice-assistant/tmp-audio/`).
 
-Explicitly read the file and attach it to the conversation so your native audio transcription runs over it. Do not assume the audio is already loaded — call your `read` tool on the path first, then rely on the resulting transcript for the memo body.
+**Transcription priority:**
+1. First check if a synthetic transcript exists at `<m4a-path>.transcript.txt`. If yes, use that directly.
+2. Explicitly read the `.m4a` file first. If the runtime materializes a transcript from that read, use it as the memo body.
+3. If `read` returns raw/binary M4A content, use the local transcription script which implements the priority order:
+   ```bash
+   bash ${HERMES_HOME:-$HOME/.hermes}/skills/apple/apple-voice-assistant/scripts/transcribe.sh /absolute/path/to/recording.m4a /tmp/apple-voice-assistant-transcript.txt
+   ```
+   Then read `/tmp/apple-voice-assistant-transcript.txt`.
+4. If the transcription script fails, send the user a message explaining that transcription failed and stop.
 
 Validate before proceeding:
 
 - path exists and is readable
-- file ends in `.m4a` (skip `.icloud` placeholders — they mean iCloud hasn't finished syncing yet; if you see one, log and stop, the launchd watcher will retry on the next change)
+- file ends in `.m4a` by the time transcription starts (raw `.qta` inputs from Voice Memos should be converted to `.m4a` first; skip `.icloud` placeholders — they mean iCloud hasn't finished syncing yet, and the launchd watcher will retry on the next change)
 - transcript is non-empty
 
 If any check fails, send the user a message explaining the problem and stop.
@@ -135,3 +164,41 @@ On every subsequent run, before Step 1, scan `TODO.md` for `FOLLOW-UP` items and
 - When writing GitHub issues or TODO lines, reference the archived transcript path (`data/YYYY/MM/DD/HH-MM-SS-<slug>.md`) rather than the original Voice Memos path — the archive is stable, the source may move or be deleted by iCloud.
 - Don't ask for confirmation before running `INSTRUCTION_DIRECT` (that's what `INSTRUCTION_UNSURE` is for) — **unless** it involves external communication (see Safety rule 1).
 - Always process the steps in order: load → classify → dedup → archive → act → audit. A failed archive never blocks the action step; a failed action never blocks the audit step.
+
+## Operational watcher notes
+
+- launchd may run the watcher with a sparse environment. Set `HOME`,
+  `HERMES_HOME`, and a `PATH` containing whichever package-manager path provides
+  `timeout` (`/run/current-system/sw/bin`, `/opt/homebrew/bin`, or similar).
+- macOS TCC access to the Voice Memos container can differ between shell tools
+  and Python. The watcher intentionally enumerates and copies Voice Memos with
+  the Hermes Python interpreter, then processes the staged copy from
+  `~/.local/state/apple-voice-assistant/tmp-audio/`.
+- If the Hermes Python path differs from
+  `${HERMES_HOME:-$HOME/.hermes}/hermes-agent/venv/bin/python`, set
+  `APPLE_VOICE_ASSISTANT_PYTHON`.
+- To force a provider/model for the Hermes handoff, set
+  `APPLE_VOICE_ASSISTANT_PROVIDER` and/or `APPLE_VOICE_ASSISTANT_MODEL`.
+  Otherwise the watcher picks an available credential-backed provider from
+  `auth.json`, then falls back to local providers.
+- To force audit delivery to a specific messaging target from non-interactive
+  sessions, set `APPLE_VOICE_ASSISTANT_AUDIT_TARGET`, for example
+  `matrix:!room:example.org`. Without this, the skill asks Hermes to use the
+  configured messaging channel and falls back to stdout.
+
+## End-to-end verification recipe
+
+Use a synthetic memo rather than waiting on iCloud:
+
+1. Copy a known-good Voice Memos audio file (`.qta` is fine) into the Voice Memos recordings directory with a unique filename like `YYYYMMDD HHMMSS-HERMESTEST.qta`.
+2. Add a matching synthetic transcript. If the watcher converts `.qta` to a staged `.m4a`, the transcript must match the staged converted path exactly, including suffix case, for example:
+   ```text
+   ~/.local/state/apple-voice-assistant/tmp-audio/2026-04-25-00-00-01-HERMESTEST.m4a.transcript.txt
+   ```
+3. Remove that basename from `~/.local/state/apple-voice-assistant/seen.txt` and remove any old processed JSON for the same memo id.
+4. Run or kick the watcher, then tail `~/.local/state/apple-voice-assistant/watcher.log` until it prints a session id and final audit.
+5. Verify all three artifacts:
+   - `~/.local/state/apple-voice-assistant/processed/<memo_id>.json`
+   - `~/.hermes/skills/apple/apple-voice-assistant/data/YYYY/MM/DD/<slug>.md`
+   - matching archived `.m4a`
+6. Verify launchd health with `launchctl print gui/$(id -u)/com.cyclingwithelephants.apple-voice-assistant`; `state = not running` with `last exit code = 0` is healthy because this watcher is short-lived.
