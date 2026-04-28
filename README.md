@@ -1,8 +1,8 @@
 # skill-apple-voice-assistant
 
-An [openclaw](https://openclaw.ai) skill that turns iPhone voice memos into actions.
+An [Hermes](https://Hermes.ai) skill that turns iPhone voice memos into actions.
 
-Record a memo on your phone. iCloud syncs it to your Mac mini. A launchd watcher fires openclaw. openclaw transcribes natively, classifies the intent, and either does the thing, asks you about it, or files it for later — reporting back via your configured messaging channel.
+Record a memo on your phone. iCloud syncs it to your Mac mini. A launchd watcher fires Hermes. Hermes transcribes natively, classifies the intent, and either does the thing, asks you about it, or files it for later — reporting back via your configured messaging channel.
 
 ## What it does
 
@@ -52,9 +52,9 @@ Mac mini: ~/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recording
         ▼
 install/watcher.sh
         │   acquires lock, validates file stability, diffs against seen-set
-        │   emits one openclaw call per new memo (with timeout)
+        │   emits one Hermes call per new memo (with timeout)
         ▼
-openclaw agent --message "new voice memo at <path>"
+hermes chat -q $'Use apple-voice-assistant.\nnew voice memo at <path>'
         │   loads SKILL.md, attaches audio, native Whisper transcribes
         ▼
 classify (+ confidence) → dedup check → archive → act → audit
@@ -63,9 +63,9 @@ classify (+ confidence) → dedup check → archive → act → audit
 ## Prerequisites
 
 - macOS (tested on Apple Silicon; should work on Intel)
-- GNU coreutils (`brew install coreutils`) — provides `timeout(1)` used by the watcher
-- [openclaw](https://openclaw.ai) installed and onboarded (`openclaw onboard`)
-- Messaging channel configured in openclaw (`openclaw channels add`) — the skill reports back via your primary channel
+- GNU coreutils — provides `timeout(1)` used by the watcher. Install it through your system package manager, such as Homebrew or Nix.
+- [Hermes](https://Hermes.ai) installed and onboarded (`Hermes onboard`)
+- Messaging channel configured in Hermes (`Hermes channels add`) — the skill reports back via your primary channel
 - Voice Memos signed into the same iCloud account as your iPhone, with iCloud sync enabled (System Settings → Apple ID → iCloud → Voice Memos)
 - Mac mini stays awake, or is set to wake for network access
 
@@ -79,8 +79,8 @@ cd skill-apple-voice-assistant
 
 The installer:
 
-1. Validates prerequisites (`openclaw`, `osascript`)
-2. Symlinks this repo into `~/.openclaw/workspace/skills/apple_voice_assistant`
+1. Validates prerequisites (`Hermes`, `osascript`)
+2. Symlinks this repo into the active Hermes workspace's `skills/` directory
 3. Renders and bootstraps the launchd watcher (fires on directory changes)
 4. Installs a daily health check (09:00 — alerts if the watcher has gone silent)
 5. Seeds the seen-set with existing memos so your history doesn't get re-processed
@@ -98,12 +98,12 @@ DOMAIN="gui/$(id -u)"
 launchctl bootout "${DOMAIN}" ~/Library/LaunchAgents/com.cyclingwithelephants.apple-voice-assistant.plist
 launchctl bootout "${DOMAIN}" ~/Library/LaunchAgents/com.cyclingwithelephants.apple-voice-assistant-healthcheck.plist
 rm ~/Library/LaunchAgents/com.cyclingwithelephants.apple-voice-assistant*.plist
-rm ~/.openclaw/workspace/skills/apple_voice_assistant
+rm "${HERMES_HOME:-$HOME/.hermes}/skills/apple/apple-voice-assistant"
 ```
 
 ## Teaching it new rules
 
-Record a memo describing the new rule (e.g. "when I say 'remind me to X', always treat that as a `TODO_ADAM`, never `TODO_ASSISTANT`"). If classified as `INSTRUCTION_ADD`, openclaw will append a proposal to `PROPOSALS.md` with a suggested patch for `SKILL.md` or the classification examples. Review, apply, done — next run picks up the new rule.
+Record a memo describing the new rule (e.g. "when I say 'remind me to X', always treat that as a `TODO_ADAM`, never `TODO_ASSISTANT`"). If classified as `INSTRUCTION_ADD`, Hermes will append a proposal to `PROPOSALS.md` with a suggested patch for `SKILL.md` or the classification examples. Review, apply, done — next run picks up the new rule.
 
 Classification examples live in [`references/classification-examples.md`](references/classification-examples.md) and grow over time as the teaching loop proposes new patterns.
 

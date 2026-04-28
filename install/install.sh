@@ -1,12 +1,10 @@
 #!/bin/bash
-# Installs the apple-voice-assistant openclaw skill and its launchd watcher on a Mac.
+# Installs the apple-voice-assistant Hermes skill and its launchd watcher on a Mac.
 # Safe to re-run: it will replace the existing plist and re-bootstrap.
 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SKILL_NAME="apple_voice_assistant"
-SKILL_DIR="${HOME}/.openclaw/workspace/skills/${SKILL_NAME}"
 STATE_DIR="${HOME}/.local/state/apple-voice-assistant"
 LAUNCH_AGENTS_DIR="${HOME}/Library/LaunchAgents"
 LABEL="com.cyclingwithelephants.apple-voice-assistant"
@@ -15,10 +13,19 @@ PLIST_DEST="${LAUNCH_AGENTS_DIR}/${LABEL}.plist"
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
+SKILLS_ROOT="${HERMES_HOME:-${HOME}/.hermes}/skills"
+SKILL_DIR="${SKILLS_ROOT}/apple/apple-voice-assistant"
+
 # --- Validate prerequisites ---
-command -v openclaw >/dev/null || die "openclaw not on PATH — install it first (see https://openclaw.ai)"
+command -v hermes >/dev/null || die "hermes not on PATH — install Hermes Agent first"
 command -v osascript >/dev/null || die "osascript not found — this skill requires macOS"
-command -v timeout >/dev/null || die "timeout(1) not found — install coreutils: brew install coreutils"
+if command -v timeout >/dev/null 2>&1; then
+  :
+elif command -v gtimeout >/dev/null 2>&1; then
+  :
+else
+  die "timeout(1) not found — install coreutils and make sure it is on PATH"
+fi
 
 # 1. Resolve the Voice Memos recordings dir.
 for candidate in \
@@ -32,16 +39,24 @@ do
 done
 [[ -n "${RECORDINGS_DIR:-}" ]] || die "Voice Memos recordings dir not found — open Voice Memos once, record a test memo, then re-run"
 say "Voice Memos dir: ${RECORDINGS_DIR}"
+say "Hermes skills root: ${SKILLS_ROOT}"
 
-# 2. Install the skill by symlinking the repo into openclaw's workspace.
+# 2. Ensure the skill is present in Hermes's active skills tree. If this script
+# is run from elsewhere, link it into the canonical Hermes skills location.
 mkdir -p "$(dirname "${SKILL_DIR}")"
-if [[ -L "${SKILL_DIR}" ]]; then
-  rm "${SKILL_DIR}"
-elif [[ -e "${SKILL_DIR}" ]]; then
-  die "${SKILL_DIR} exists and is not a symlink — move it aside and re-run"
+if [[ "$(cd "${REPO_DIR}" && pwd)" != "$(cd "$(dirname "${SKILL_DIR}")" && pwd)/$(basename "${SKILL_DIR}")" ]]; then
+  if [[ -L "${SKILL_DIR}" ]]; then
+    rm "${SKILL_DIR}"
+  elif [[ -e "${SKILL_DIR}" ]]; then
+    if [[ "$(cd "${SKILL_DIR}" && pwd)" != "${REPO_DIR}" ]]; then
+      die "${SKILL_DIR} exists and is not this repo — move it aside and re-run"
+    fi
+  fi
+  if [[ ! -e "${SKILL_DIR}" ]]; then
+    ln -s "${REPO_DIR}" "${SKILL_DIR}"
+  fi
 fi
-ln -s "${REPO_DIR}" "${SKILL_DIR}"
-say "Linked skill: ${SKILL_DIR} -> ${REPO_DIR}"
+say "Skill available at: ${SKILL_DIR}"
 
 # 3. Prepare state dir.
 mkdir -p "${STATE_DIR}" "${STATE_DIR}/processed"
@@ -95,7 +110,10 @@ if [[ -s "${STATE_DIR}/seen.txt" ]]; then
     say "Migrated seen-set ($(wc -l < "${STATE_DIR}/seen.txt" | tr -d ' ') entries)"
   fi
 else
-  find "${RECORDINGS_DIR}" -maxdepth 1 -name '*.m4a' -type f -exec basename {} \; > "${STATE_DIR}/seen.txt" || true
+  {
+    find "${RECORDINGS_DIR}" -maxdepth 1 -name '*.m4a' -type f -exec basename {} \; || true
+    find "${RECORDINGS_DIR}" -maxdepth 1 -name '*.qta' -type f -exec basename {} \; || true
+  } | sort > "${STATE_DIR}/seen.txt"
   say "Seeded seen-set with existing memos ($(wc -l < "${STATE_DIR}/seen.txt" | tr -d ' ') files)"
 fi
 
@@ -110,7 +128,7 @@ Install complete.
   logs:      ${STATE_DIR}/watcher.log
              ${STATE_DIR}/launchd.{out,err}.log
 
-Record a new voice memo on your iPhone — it should sync to the Mac mini and fire openclaw.
+Record a new voice memo on your iPhone — it should sync to the Mac mini and fire Hermes.
 You can tail the watcher log to confirm:
 
   tail -f "${STATE_DIR}/watcher.log"
