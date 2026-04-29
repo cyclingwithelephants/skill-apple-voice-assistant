@@ -6,23 +6,19 @@ homepage: https://github.com/cyclingwithelephants/skill-apple-voice-assistant
 
 # Apple Voice Assistant
 
-You process iPhone voice memos on behalf of the user (Adam, GitHub `cyclingwithelephants`). A launchd watcher on the Mac mini fires you whenever a new `.m4a` appears in the iCloud Voice Memos directory. The launchd job invokes you with a message of the form:
+You process iPhone voice memos on behalf of the user. A launchd watcher on the Mac fires you whenever a new `.m4a` appears in the iCloud Voice Memos directory. The launchd job invokes you with a message of the form:
 
 > new voice memo at `/absolute/path/to/recording.m4a`
 
 ## Step 0 — Watcher/TCC handling on macOS/Nix
 
-The launchd watcher may run without the same TCC privacy grant as an interactive shell. On Adam's Mac/Nix setup, bash globbing, `ls`, and other shell reads of the Voice Memos container can fail even after Python has been granted Full Disk Access / Files & Folders access.
+The launchd watcher may run without the same TCC privacy grant as an interactive shell. On macOS, shell globbing, `ls`, and other non-approved processes can fail to read the Voice Memos container even after the configured Python runtime has been granted Full Disk Access / Files & Folders access.
 
-Use the Hermes venv Python explicitly for watcher-side discovery/copy work:
-
-```bash
-/Users/adam/.hermes/hermes-agent/venv/bin/python
-```
+Use the configured Python runtime for watcher-side discovery/copy work. The nix-darwin module exposes this as `services.apple-voice-assistant.python`, and the manual installer uses the Python running the installed watcher.
 
 Preferred watcher pattern:
 
-1. Use Python to enumerate `/Users/adam/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings`.
+1. Use Python to enumerate the configured Voice Memos recordings directory.
 2. Skip directories and `.icloud` placeholders.
 3. Copy the source audio into an unprotected staging directory before invoking shell tools:
    ```text
@@ -33,14 +29,14 @@ Preferred watcher pattern:
 
 ## Step 1 — Load the audio
 
-Extract the absolute path from the triggering message (e.g. `/Users/adam/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/20260419 083045.m4a` or a staged copy under `~/.local/state/apple-voice-assistant/tmp-audio/`).
+Extract the absolute path from the triggering message (e.g. `/Users/<user>/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/20260419 083045.m4a` or a staged copy under `~/.local/state/apple-voice-assistant/tmp-audio/`).
 
 **Transcription priority:**
 1. First check if a synthetic transcript exists at `<m4a-path>.transcript.txt`. If yes, use that directly.
 2. Explicitly read the `.m4a` file first. If the runtime materializes a transcript from that read, use it as the memo body.
 3. If `read` returns raw/binary M4A content, use the local transcription script which implements the priority order:
    ```bash
-   bash ${HERMES_HOME:-$HOME/.hermes}/skills/apple/apple-voice-assistant/scripts/transcribe.sh /absolute/path/to/recording.m4a /tmp/apple-voice-assistant-transcript.txt
+   ${APPLE_VOICE_ASSISTANT_PYTHON:-python3} ${HERMES_HOME:-$HOME/.hermes}/skills/apple/apple-voice-assistant/scripts/transcribe.py /absolute/path/to/recording.m4a /tmp/apple-voice-assistant-transcript.txt
    ```
    Then read `/tmp/apple-voice-assistant-transcript.txt`.
 4. If the transcription script fails, send the user a message explaining that transcription failed and stop.

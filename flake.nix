@@ -29,6 +29,8 @@
           HOME = home;
           HERMES_HOME = cfg.runtimeHome;
           APPLE_VOICE_ASSISTANT_PYTHON = cfg.python;
+          APPLE_VOICE_ASSISTANT_RECORDINGS_DIR = recordingsDir;
+          APPLE_VOICE_ASSISTANT_STATE_DIR = stateDir;
         } // cfg.environment;
       in {
         options.services.apple-voice-assistant = {
@@ -106,7 +108,7 @@
             Label = "com.cyclingwithelephants.apple-voice-assistant";
             UserName = cfg.user;
             GroupName = cfg.group;
-            ProgramArguments = [ "${cfg.skillPath}/install/watcher.sh" ];
+            ProgramArguments = [ cfg.python "${cfg.skillPath}/install/watcher.py" ];
             WatchPaths = [ recordingsDir ];
             StartInterval = 10;
             RunAtLoad = true;
@@ -123,7 +125,7 @@
             Label = "com.cyclingwithelephants.apple-voice-assistant-healthcheck";
             UserName = cfg.user;
             GroupName = cfg.group;
-            ProgramArguments = [ "${cfg.skillPath}/install/healthcheck.sh" ];
+            ProgramArguments = [ cfg.python "${cfg.skillPath}/install/healthcheck.py" ];
             StartCalendarInterval = [{ Hour = 9; Minute = 0; }];
             StandardOutPath = "${stateDir}/healthcheck.out.log";
             StandardErrorPath = "${stateDir}/healthcheck.err.log";
