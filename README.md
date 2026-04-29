@@ -69,6 +69,36 @@ classify (+ confidence) → dedup check → archive → act → audit
 - Voice Memos signed into the same iCloud account as your iPhone, with iCloud sync enabled (System Settings → Apple ID → iCloud → Voice Memos)
 - Mac mini stays awake, or is set to wake for network access
 
+## Nix flake / nix-darwin
+
+This repo exposes a nix-darwin module for declarative installs:
+
+```nix
+{
+  inputs.skill-apple-voice-assistant.url = "github:cyclingwithelephants/skill-apple-voice-assistant";
+
+  outputs = inputs@{ nix-darwin, skill-apple-voice-assistant, ... }: {
+    darwinConfigurations.my-mac = nix-darwin.lib.darwinSystem {
+      modules = [
+        skill-apple-voice-assistant.darwinModules.default
+        ({ ... }: {
+          services.apple-voice-assistant = {
+            enable = true;
+            user = "your-username";
+            environment = {
+              APPLE_VOICE_ASSISTANT_WHISPER_API_BASE = "http://127.0.0.1:9099";
+              APPLE_VOICE_ASSISTANT_AUDIT_TARGET = "matrix:!roomid:example.org";
+            };
+          };
+        })
+      ];
+    };
+  };
+}
+```
+
+The module mirrors the two plist files in `install/`: it installs the watcher and healthcheck LaunchAgents, creates the state directory, and runs scripts directly from the pinned flake source. It intentionally does not install Hermes itself; use `runtimeHome`, `python`, `environment`, or `skillPath` if your runtime layout differs from the defaults.
+
 ## Install
 
 ```bash
