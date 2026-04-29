@@ -44,7 +44,7 @@ A Markdown file with YAML frontmatter followed by the full transcript body:
 ```markdown
 ---
 memo_id: "20260419 083045"
-source_path: /Users/adam/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/20260419 083045.m4a
+source_path: /Users/<user>/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/20260419 083045.m4a
 source_mtime: 1745053845
 source_size_bytes: 234567
 recorded_at: 2026-04-19T08:30:45Z

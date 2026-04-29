@@ -2,7 +2,7 @@
 
 An [Hermes](https://Hermes.ai) skill that turns iPhone voice memos into actions.
 
-Record a memo on your phone. iCloud syncs it to your Mac mini. A launchd watcher fires Hermes. Hermes transcribes natively, classifies the intent, and either does the thing, asks you about it, or files it for later — reporting back via your configured messaging channel.
+Record a memo on your phone. iCloud syncs it to your Mac. A launchd watcher fires Hermes. Hermes transcribes natively, classifies the intent, and either does the thing, asks you about it, or files it for later — reporting back via your configured messaging channel.
 
 ## What it does
 
@@ -47,10 +47,10 @@ iPhone Voice Memos.app
 iCloud sync
         │
         ▼
-Mac mini: ~/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/
+Mac: ~/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/
         │   launchd WatchPaths fires
         ▼
-install/watcher.sh
+install/watcher.py
         │   acquires lock, validates file stability, diffs against seen-set
         │   emits one Hermes call per new memo (with timeout)
         ▼
@@ -63,11 +63,10 @@ classify (+ confidence) → dedup check → archive → act → audit
 ## Prerequisites
 
 - macOS (tested on Apple Silicon; should work on Intel)
-- GNU coreutils — provides `timeout(1)` used by the watcher. Install it through your system package manager, such as Homebrew or Nix.
 - [Hermes](https://Hermes.ai) installed and onboarded (`Hermes onboard`)
 - Messaging channel configured in Hermes (`Hermes channels add`) — the skill reports back via your primary channel
 - Voice Memos signed into the same iCloud account as your iPhone, with iCloud sync enabled (System Settings → Apple ID → iCloud → Voice Memos)
-- Mac mini stays awake, or is set to wake for network access
+- Mac stays awake, or is set to wake for network access
 
 ## Nix flake / nix-darwin
 
@@ -104,7 +103,7 @@ The module mirrors the two plist files in `install/`: it installs the watcher an
 ```bash
 git clone https://github.com/cyclingwithelephants/skill-apple-voice-assistant.git
 cd skill-apple-voice-assistant
-./install/install.sh
+./install/install.py
 ```
 
 The installer:
@@ -143,11 +142,11 @@ Classification examples live in [`references/classification-examples.md`](refere
 - [`references/classification-examples.md`](references/classification-examples.md) — worked examples for classification
 - [`references/actions.md`](references/actions.md) — what each state does
 - [`references/archive-format.md`](references/archive-format.md) — archive directory layout and transcript metadata spec
-- [`install/watcher.sh`](install/watcher.sh) — launchd-fired shell script (lock, stability check, timeout, seen-set diff)
-- [`install/healthcheck.sh`](install/healthcheck.sh) — daily health check (alerts if watcher goes silent)
+- [`install/watcher.py`](install/watcher.py) — launchd-fired Python watcher (lock, stability check, timeout, seen-set diff)
+- [`install/healthcheck.py`](install/healthcheck.py) — daily health check (alerts if watcher goes silent)
 - [`install/com.cyclingwithelephants.apple-voice-assistant.plist`](install/com.cyclingwithelephants.apple-voice-assistant.plist) — launchd watcher agent
 - [`install/com.cyclingwithelephants.apple-voice-assistant-healthcheck.plist`](install/com.cyclingwithelephants.apple-voice-assistant-healthcheck.plist) — launchd health check agent
-- [`install/install.sh`](install/install.sh) — wires it all up
+- [`install/install.py`](install/install.py) — wires it all up
 
 ## License
 
