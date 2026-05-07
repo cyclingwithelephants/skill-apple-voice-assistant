@@ -8,7 +8,7 @@ STATE_DIR: `~/.local/state/apple-voice-assistant`
 
 ## Non-negotiable confirmation requirement
 
-Adam wants a Matrix confirmation/audit message every time a voice memo is processed, regardless of category or whether the action succeeded, failed, or only created a draft. Send it to `matrix:!nSlDhIlsFlFubTCaWO:matrix.adamland.xyz`. If Matrix delivery fails, append a FOLLOW-UP line to `~/.local/state/apple-voice-assistant/TODO.md` with enough detail to replay the missed confirmation later.
+The user requires an audit message every time a voice memo is processed, regardless of category or whether the action succeeded, failed, or only created a draft. Send it to the configured audit target (see `APPLE_VOICE_ASSISTANT_AUDIT_TARGET` env var). If delivery fails, append a FOLLOW-UP line to `~/.local/state/apple-voice-assistant/TODO.md` with enough detail to replay the missed confirmation later.
 
 ## Step 1: Try Apple Reminder via remindctl (best-effort)
 
@@ -79,7 +79,7 @@ Write this JSON to `~/.local/state/apple-voice-assistant/processed/<memo_id>.jso
 
 ## Step: Audit
 
-Send audit summary to Matrix room `matrix:!nSlDhIlsFlFubTCaWO:matrix.adamland.xyz`.
+Send audit summary to the configured audit target.
 If Matrix is unavailable, append a FOLLOW-UP line to `~/.local/state/apple-voice-assistant/TODO.md`.
 Include: transcript summary, category, confidence, action taken, archive path.
 

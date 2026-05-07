@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Deterministic voice memo processor — no LLM calls.
+"""Deterministic voice memo processor.
 
 Triggered by launchd when new files appear in the Voice Memos directory.
 Handles: discovery → transcription → dedup → archive → webhook to Hermes.
+Transcription uses a local Whisper API by default (no cloud calls required),
+with an optional OpenAI fallback if configured.
 """
 
 import hashlib
@@ -39,6 +41,7 @@ if _env_file.is_file():
             os.environ.setdefault(k, v)
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+WHISPER_API_BASE = os.environ.get("APPLE_VOICE_ASSISTANT_WHISPER_API_BASE", "http://127.0.0.1:9099")
 WEBHOOK_URL = os.environ.get("APPLE_VOICE_ASSISTANT_WEBHOOK_URL", "http://127.0.0.1:8644/webhooks/voice-memo")
 WEBHOOK_SECRET = os.environ.get("APPLE_VOICE_ASSISTANT_WEBHOOK_SECRET", "")
 
@@ -158,21 +161,36 @@ def _multipart_audio(audio_path: Path, model: str) -> tuple[bytes, str]:
     return parts, boundary
 
 
-def transcribe(audio_path: Path) -> str | None:
-    """Transcribe via OpenAI gpt-4o-transcribe. Returns transcript text or None."""
-    # Check for synthetic transcript first
-    synthetic = Path(str(audio_path) + ".transcript.txt")
-    if synthetic.exists():
-        text = synthetic.read_text().strip()
-        if text:
-            log(f"using synthetic transcript for {audio_path.name}")
-            return text
-
-    if not OPENAI_API_KEY:
-        log(f"OPENAI_API_KEY not set, cannot transcribe {audio_path.name}")
+def _transcribe_local_whisper(audio_path: Path) -> str | None:
+    """Try the local Whisper API. Returns transcript text or None."""
+    try:
+        urllib.request.urlopen(f"{WHISPER_API_BASE}/health", timeout=5).close()
+    except Exception:
         return None
 
-    # Call OpenAI gpt-4o-transcribe
+    try:
+        body, boundary = _multipart_audio(audio_path, "whisper-1")
+        req = urllib.request.Request(
+            f"{WHISPER_API_BASE}/v1/audio/transcriptions",
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            result = json.loads(resp.read())
+            text = result.get("text", "").strip()
+            if text:
+                log(f"transcribed {audio_path.name} via local Whisper API at {WHISPER_API_BASE}")
+                return text
+    except Exception as e:
+        log(f"local Whisper API failed for {audio_path.name}: {e}")
+    return None
+
+
+def _transcribe_openai(audio_path: Path) -> str | None:
+    """Fallback: OpenAI cloud transcription. Returns transcript text or None."""
+    if not OPENAI_API_KEY:
+        return None
     try:
         body, boundary = _multipart_audio(audio_path, "gpt-4o-transcribe")
         req = urllib.request.Request(
@@ -188,11 +206,34 @@ def transcribe(audio_path: Path) -> str | None:
             result = json.loads(resp.read())
             text = result.get("text", "").strip()
             if text:
-                log(f"transcribed {audio_path.name} via gpt-4o-transcribe")
+                log(f"transcribed {audio_path.name} via OpenAI gpt-4o-transcribe")
                 return text
     except Exception as e:
-        log(f"gpt-4o-transcribe failed for {audio_path.name}: {e}")
+        log(f"OpenAI transcription failed for {audio_path.name}: {e}")
+    return None
 
+
+def transcribe(audio_path: Path) -> str | None:
+    """Transcribe audio. Priority: synthetic → local Whisper API → OpenAI cloud."""
+    # Check for synthetic transcript first
+    synthetic = Path(str(audio_path) + ".transcript.txt")
+    if synthetic.exists():
+        text = synthetic.read_text().strip()
+        if text:
+            log(f"using synthetic transcript for {audio_path.name}")
+            return text
+
+    # Try local Whisper API first (no cloud dependency)
+    text = _transcribe_local_whisper(audio_path)
+    if text:
+        return text
+
+    # Fall back to OpenAI cloud transcription
+    text = _transcribe_openai(audio_path)
+    if text:
+        return text
+
+    log(f"all transcription methods failed for {audio_path.name}")
     return None
 
 
