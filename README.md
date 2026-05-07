@@ -2,26 +2,26 @@
 
 An [Hermes](https://Hermes.ai) skill that turns iPhone voice memos into actions.
 
-Record a memo on your phone. iCloud syncs it to your Mac mini. A launchd watcher fires Hermes. Hermes transcribes natively, classifies the intent, and either does the thing, asks you about it, or files it for later — reporting back via your configured messaging channel.
+Record a memo on your phone. iCloud syncs it to your Mac mini. A deterministic Python watcher transcribes it, archives it, and fires a webhook to the Hermes gateway. Hermes classifies the intent and either does the thing, asks you about it, or files it for later — reporting back via Matrix.
 
 ## What it does
 
-Each new `.m4a` in your Voice Memos iCloud sync dir is classified into one of twelve states, each with its own action:
+Each new `.m4a` in your Voice Memos iCloud sync dir is classified into one of twelve states, each with its own action file:
 
-| State                | Action                                                             |
-| -------------------- | ------------------------------------------------------------------ |
-| `INSTRUCTION_DIRECT` | Carry out the instruction, report back                             |
-| `INSTRUCTION_ADD`    | Record a rule proposal in `PROPOSALS.md` with a suggested patch    |
-| `INSTRUCTION_UNSURE` | Ask the user to confirm **and** file a disambiguating example      |
-| `TODO_ADAM`          | Create an Apple Reminder in the default (Siri) list                |
-| `TODO_ASSISTANT`     | Append to `TODO.md` in this skill's directory                      |
-| `MEMORY_NOTE`        | Write to the runtime's memory system                               |
-| `JOURNAL_NOTE`       | Archive only — raw thoughts, reflections                           |
-| `IDEA_CAPTURE`       | Archive + append to `IDEAS.md`                                     |
-| `RESEARCH_REQUEST`   | File a research task (don't act immediately)                       |
-| `MESSAGE_DRAFT`      | Draft a message, **never** send without confirmation               |
-| `TRANSCRIBE_ONLY`    | Archive transcript, no action                                      |
-| `UNKNOWN`            | Ask how to categorize — feeds the classification training pipeline |
+| State                    | Action                                                                 |
+| ------------------------ | ---------------------------------------------------------------------- |
+| `EXTERNAL_MESSAGE_DRAFT` | Draft a message/reply; never send without explicit confirmation        |
+| `REMINDER_OR_ALARM`      | Create a reminder/alarm/list item and log fallback state               |
+| `QUESTION_ANSWER`        | Answer a factual/how-to/explanatory question directly                  |
+| `IMPLEMENTATION_TASK`    | Build/change/test something now, then report                           |
+| `PLANNING_REQUEST`       | Produce a project plan/approach/design                                 |
+| `INSTRUCTION_DIRECT`     | Legacy/general direct instruction not covered by a narrower state      |
+| `INSTRUCTION`            | Record a rule proposal in `PROPOSALS.md` with a suggested patch        |
+| `TODO`                   | Legacy/general task capture — create an Apple Reminder + log TODO.md   |
+| `MEMORY_NOTE`            | Persist a durable fact to Hermes memory                                |
+| `IDEA_CAPTURE`           | Capture a product/project/creative idea in memory                      |
+| `RESEARCH_REQUEST`       | File a research task; do not act immediately                           |
+| `UNKNOWN`                | Message the user for clarification                                     |
 
 Every classification also carries a **confidence level** (`high`/`medium`/`low`). Low-confidence classifications never trigger external or irreversible actions.
 
@@ -50,56 +50,45 @@ iCloud sync
 Mac mini: ~/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/
         │   launchd WatchPaths fires
         ▼
-install/watcher.sh
+scripts/process-memo.py                          ← deterministic, no LLM
         │   acquires lock, validates file stability, diffs against seen-set
-        │   emits one Hermes call per new memo (with timeout)
+        │   transcribes via local Whisper API
+        │   archives audio + transcript to ~/.local/state/.../data/
+        │   POSTs webhook to Hermes gateway
         ▼
-hermes chat -q $'Use apple-voice-assistant.\nnew voice memo at <path>'
-        │   loads SKILL.md, attaches audio, native Whisper transcribes
+Hermes gateway (http://127.0.0.1:8644/webhooks/voice-memo)
+        │   receives JSON: memo_id, transcript, archive_path, source metadata
+        │   loads SKILL.md + apple-voice-assistant skill
         ▼
-classify (+ confidence) → dedup check → archive → act → audit
+classify (+ confidence) → update archive → act → audit to Matrix
 ```
+
+Two decoupled components:
+
+- **Watcher** (`process-memo.py`) — deterministic Python, no LLM calls. Handles I/O: discovery, transcription, dedup, archiving, webhook POST.
+- **Hermes webhook handler** — LLM-powered. Handles intelligence: classification, action dispatch, audit.
 
 ## Prerequisites
 
 - macOS (tested on Apple Silicon; should work on Intel)
-- GNU coreutils — provides `timeout(1)` used by the watcher. Install it through your system package manager, such as Homebrew or Nix.
 - [Hermes](https://Hermes.ai) installed and onboarded (`Hermes onboard`)
-- Messaging channel configured in Hermes (`Hermes channels add`) — the skill reports back via your primary channel
+- Local Whisper API running at `http://127.0.0.1:9099` (for transcription)
+- Messaging channel configured in Hermes — the skill reports back via Matrix
 - Voice Memos signed into the same iCloud account as your iPhone, with iCloud sync enabled (System Settings → Apple ID → iCloud → Voice Memos)
 - Mac mini stays awake, or is set to wake for network access
 
-## Nix flake / nix-darwin
+## Install
 
-This repo exposes a nix-darwin module for declarative installs:
+On `radish`, do not run the installer. This repo vendors the skill under
+`skills/apple/apple-voice-assistant/`; nix-darwin symlinks it into
+`~/.hermes/skills/apple/apple-voice-assistant` and declares the launchd daemons
+from `hosts/radish/configuration.nix`. After a rebuild, register the webhook:
 
-```nix
-{
-  inputs.skill-apple-voice-assistant.url = "github:cyclingwithelephants/skill-apple-voice-assistant";
-
-  outputs = inputs@{ nix-darwin, skill-apple-voice-assistant, ... }: {
-    darwinConfigurations.my-mac = nix-darwin.lib.darwinSystem {
-      modules = [
-        skill-apple-voice-assistant.darwinModules.default
-        ({ ... }: {
-          services.apple-voice-assistant = {
-            enable = true;
-            user = "your-username";
-            environment = {
-              APPLE_VOICE_ASSISTANT_WHISPER_API_BASE = "http://127.0.0.1:9099";
-              APPLE_VOICE_ASSISTANT_AUDIT_TARGET = "matrix:!roomid:example.org";
-            };
-          };
-        })
-      ];
-    };
-  };
-}
+```bash
+bash ~/.hermes/skills/apple/apple-voice-assistant/scripts/setup-webhook.sh
 ```
 
-The module mirrors the two plist files in `install/`: it installs the watcher and healthcheck LaunchAgents, creates the state directory, and runs scripts directly from the pinned flake source. It intentionally does not install Hermes itself; use `runtimeHome`, `python`, `environment`, or `skillPath` if your runtime layout differs from the defaults.
-
-## Install
+For non-Nix macOS hosts:
 
 ```bash
 git clone https://github.com/cyclingwithelephants/skill-apple-voice-assistant.git
@@ -128,26 +117,27 @@ DOMAIN="gui/$(id -u)"
 launchctl bootout "${DOMAIN}" ~/Library/LaunchAgents/com.cyclingwithelephants.apple-voice-assistant.plist
 launchctl bootout "${DOMAIN}" ~/Library/LaunchAgents/com.cyclingwithelephants.apple-voice-assistant-healthcheck.plist
 rm ~/Library/LaunchAgents/com.cyclingwithelephants.apple-voice-assistant*.plist
-rm "${HERMES_HOME:-$HOME/.hermes}/skills/apple/apple-voice-assistant"
+rm ~/.hermes/skills/apple/apple-voice-assistant
 ```
 
 ## Teaching it new rules
 
-Record a memo describing the new rule (e.g. "when I say 'remind me to X', always treat that as a `TODO_ADAM`, never `TODO_ASSISTANT`"). If classified as `INSTRUCTION_ADD`, Hermes will append a proposal to `PROPOSALS.md` with a suggested patch for `SKILL.md` or the classification examples. Review, apply, done — next run picks up the new rule.
+Record a memo describing the new rule (e.g. "when I say 'remind me to X', always treat that as a `TODO`"). If classified as `INSTRUCTION`, Hermes will append a proposal to `PROPOSALS.md` with a suggested patch for `SKILL.md` or the classification examples. Review, apply, done — next run picks up the new rule.
 
 Classification examples live in [`references/classification-examples.md`](references/classification-examples.md) and grow over time as the teaching loop proposes new patterns.
 
 ## Files
 
 - [`SKILL.md`](SKILL.md) — the skill core (workflow, safety rules, classification states)
+- [`scripts/process-memo.py`](scripts/process-memo.py) — deterministic Python watcher (discovery, transcription, archiving, webhook POST)
+- [`scripts/setup-webhook.sh`](scripts/setup-webhook.sh) — registers the voice-memo webhook subscription with the Hermes gateway
+- [`scripts/transcribe.sh`](scripts/transcribe.sh) — transcription fallback chain (whisper API, mlx-whisper, faster-whisper, OpenAI)
 - [`references/classification-examples.md`](references/classification-examples.md) — worked examples for classification
-- [`references/actions.md`](references/actions.md) — what each state does
+- [`references/action_*.md`](references/) — per-state action specs (one per classification state)
 - [`references/archive-format.md`](references/archive-format.md) — archive directory layout and transcript metadata spec
-- [`install/watcher.sh`](install/watcher.sh) — launchd-fired shell script (lock, stability check, timeout, seen-set diff)
 - [`install/healthcheck.sh`](install/healthcheck.sh) — daily health check (alerts if watcher goes silent)
-- [`install/com.cyclingwithelephants.apple-voice-assistant.plist`](install/com.cyclingwithelephants.apple-voice-assistant.plist) — launchd watcher agent
-- [`install/com.cyclingwithelephants.apple-voice-assistant-healthcheck.plist`](install/com.cyclingwithelephants.apple-voice-assistant-healthcheck.plist) — launchd health check agent
-- [`install/install.sh`](install/install.sh) — wires it all up
+- [`install/watcher.sh`](install/watcher.sh) — legacy shell watcher (for non-Nix installs without webhook support)
+- [`install/install.sh`](install/install.sh) — legacy installer for non-Nix macOS hosts
 
 ## License
 

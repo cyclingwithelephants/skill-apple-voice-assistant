@@ -2,11 +2,10 @@
 # Transcription fallback for apple-voice-assistant skill
 # Priority:
 # 1) synthetic transcript
-# 2) local Whisper API
-# 3) Swift SFSpeechRecognizer
-# 4) mlx-whisper (M4 GPU)
-# 5) faster-whisper (CPU)
-# 6) OpenAI Whisper
+# 2) local Whisper API managed by radish
+# 3) mlx-whisper (M4 GPU)
+# 4) faster-whisper (CPU)
+# 5) OpenAI Whisper API
 
 set -euo pipefail
 
@@ -22,7 +21,7 @@ if [[ -f "$SYNTHETIC" ]]; then
     exit 0
 fi
 
-# Prefer a local Whisper API when available.
+# Prefer the radish-managed local Whisper API when available.
 if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
     if curl -sf --max-time 5 "${WHISPER_API_BASE}/health" >/dev/null 2>&1; then
         transcript_json="$(mktemp -t apple-voice-assistant-whisper.XXXXXX.json)"
@@ -42,16 +41,7 @@ if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
     fi
 fi
 
-# Try Swift SFSpeechRecognizer
-SWIFT_SCRIPT="/Users/adam/.hermes/tmp_speech_transcribe.swift"
-if [[ -f "$SWIFT_SCRIPT" ]]; then
-    if swift "$SWIFT_SCRIPT" "$AUDIO_FILE" > "$OUTPUT_FILE" 2>/dev/null; then
-        echo "Transcribed using SFSpeechRecognizer" >&2
-        exit 0
-    fi
-fi
-
-PYTHON_BIN="${APPLE_VOICE_ASSISTANT_PYTHON:-/Users/adam/.hermes/hermes-agent/venv/bin/python}"
+PYTHON_BIN="${APPLE_VOICE_ASSISTANT_PYTHON:-${HERMES_HOME:-${HOME}/.hermes}/hermes-agent/venv/bin/python}"
 if [[ ! -x "$PYTHON_BIN" ]]; then
     PYTHON_BIN="$(command -v python3 || true)"
 fi
@@ -113,11 +103,23 @@ PY
     fi
 fi
 
-# Try OpenAI Whisper API
-if [[ -n "${OPENAI_API_KEY:-}" ]]; then
-    if bash /opt/homebrew/lib/node_modules/Hermes/skills/openai-whisper-api/scripts/transcribe.sh "$AUDIO_FILE" --out "$OUTPUT_FILE" 2>/dev/null; then
-        echo "Transcribed using OpenAI Whisper" >&2
-        exit 0
+# Try OpenAI Whisper API (direct curl — no external script dependency)
+if [[ -n "${OPENAI_API_KEY:-}" ]] && command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+    openai_json="$(mktemp -t apple-voice-assistant-openai.XXXXXX.json)"
+    if curl -sf --max-time 120 \
+        -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+        -F "file=@${AUDIO_FILE}" \
+        -F "model=whisper-1" \
+        "https://api.openai.com/v1/audio/transcriptions" >"$openai_json" 2>/dev/null; then
+        text="$(jq -r '.text // ""' "$openai_json" 2>/dev/null || true)"
+        rm -f "$openai_json"
+        if [[ -n "$text" ]]; then
+            printf '%s\n' "$text" >"$OUTPUT_FILE"
+            echo "Transcribed using OpenAI Whisper API" >&2
+            exit 0
+        fi
+    else
+        rm -f "$openai_json"
     fi
 fi
 

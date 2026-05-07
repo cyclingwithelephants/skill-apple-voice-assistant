@@ -10,11 +10,17 @@
 
 set -euo pipefail
 
-export HOME="${HOME:-/Users/adam}"
+: "${HOME:?HOME must be set}"
 export PATH="/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 export HERMES_HOME="${HERMES_HOME:-${HOME}/.hermes}"
 
 STATE_DIR="${HOME}/.local/state/apple-voice-assistant"
+
+# Source API keys written by the nix activation script.
+# Workaround: Hermes custom_providers doesn't pass api_key to the OpenAI client.
+if [[ -f "${STATE_DIR}/env" ]]; then
+  set -a; source "${STATE_DIR}/env"; set +a
+fi
 SEEN_FILE="${STATE_DIR}/seen.txt"
 LOG_FILE="${STATE_DIR}/watcher.log"
 LOCK_DIR="${STATE_DIR}/watcher.lock"
@@ -26,9 +32,8 @@ HERMES_SKILL="apple-voice-assistant"
 HERMES_TOOLSETS="file,terminal,messaging,memory,todo"
 PYTHON_BIN="${APPLE_VOICE_ASSISTANT_PYTHON:-${HERMES_HOME}/hermes-agent/venv/bin/python}"
 SELF_CHECK_MODE="${APPLE_VOICE_ASSISTANT_SELF_CHECK:-0}"
-AUDIT_TARGET="${APPLE_VOICE_ASSISTANT_AUDIT_TARGET:-}"
 
-# Require timeout(1) from coreutils.
+# Require timeout(1) from coreutils. On radish, nix-darwin provides it.
 if command -v timeout >/dev/null 2>&1; then
   TIMEOUT_BIN="$(command -v timeout)"
 elif command -v gtimeout >/dev/null 2>&1; then
@@ -44,52 +49,6 @@ mkdir -p "${STATE_DIR}" "${PROCESSED_DIR}" "${TMP_AUDIO_DIR}"
 touch "${SEEN_FILE}" "${LOG_FILE}"
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> "${LOG_FILE}"; }
-
-pick_handoff_provider() {
-  if [[ -n "${APPLE_VOICE_ASSISTANT_PROVIDER:-}" || -n "${APPLE_VOICE_ASSISTANT_MODEL:-}" ]]; then
-    printf '%s\t%s\n' "${APPLE_VOICE_ASSISTANT_PROVIDER:-}" "${APPLE_VOICE_ASSISTANT_MODEL:-}"
-    return 0
-  fi
-
-  if [[ ! -f "${HERMES_HOME}/auth.json" ]]; then
-    printf '%s\t%s\n' "llama-local" "qwen3.6-35b-a3b"
-    return 0
-  fi
-
-  if "${PYTHON_BIN}" - "${HERMES_HOME}/auth.json" <<'PY' >/dev/null 2>&1
-import json
-import sys
-from pathlib import Path
-
-auth = json.loads(Path(sys.argv[1]).read_text())
-providers = auth.get("providers", {})
-pool = auth.get("credential_pool", {})
-
-has_codex = bool(providers.get("openai-codex")) or bool(pool.get("openai-codex"))
-sys.exit(0 if has_codex else 1)
-PY
-  then
-    printf '%s\t%s\n' "openai-codex" "gpt-5.5"
-    return 0
-  fi
-
-  if "${PYTHON_BIN}" - "${HERMES_HOME}/auth.json" <<'PY' >/dev/null 2>&1
-import json
-import sys
-from pathlib import Path
-
-auth = json.loads(Path(sys.argv[1]).read_text())
-pool = auth.get("credential_pool", {})
-has_openrouter = bool(pool.get("openrouter"))
-sys.exit(0 if has_openrouter else 1)
-PY
-  then
-    printf '%s\t%s\n' "openrouter" "google/gemini-2.5-flash-preview:free"
-    return 0
-  fi
-
-  printf '%s\t%s\n' "llama-local" "qwen3.6-35b-a3b"
-}
 
 normalized_stem() {
   local name="$1"
@@ -261,30 +220,12 @@ for i in "${!new_memos[@]}"; do
 
   log "new memo: ${memo_basename}"
 
-  session_id="apple-voice-assistant:${normalized_name}"
-  IFS=$'\t' read -r HERMES_PROVIDER HERMES_MODEL < <(pick_handoff_provider)
-  provider_args=()
-  if [[ -n "${HERMES_PROVIDER}" ]]; then
-    provider_args+=(--provider "${HERMES_PROVIDER}")
-  fi
-  if [[ -n "${HERMES_MODEL}" ]]; then
-    provider_args+=(--model "${HERMES_MODEL}")
-  fi
-  log "using Hermes provider=${HERMES_PROVIDER:-default} model=${HERMES_MODEL:-default} for ${memo_basename}"
-
-  # Hand off to Hermes with a timeout.
-  # Current Hermes CLI uses `chat -q`; the old OpenClaw flags (--agent,
-  # --session-id, --deliver, --reply-*) no longer exist.
+  # Hand off to Hermes with a timeout. Don't pass --provider or --model;
+  # Hermes uses its config.yaml defaults + fallback_providers chain
+  # (openrouter → llama-local/qwen3.6-35b → mlx-radish-local/4B).
   prompt=$'new voice memo at `'
   prompt+="${handoff_path}"
-  prompt+=$'`\n\nProcess it with apple-voice-assistant.'
-  if [[ -n "${AUDIT_TARGET}" ]]; then
-    prompt+=$' At the audit step, send the audit summary using explicit target `'
-    prompt+="${AUDIT_TARGET}"
-    prompt+=$'` if the messaging tool is available; otherwise print the audit summary to stdout.'
-  else
-    prompt+=$' At the audit step, send the audit summary through the configured messaging channel if available; otherwise print the audit summary to stdout.'
-  fi
+  prompt+=$'`\n\nProcess it with apple-voice-assistant. At the audit step, you MUST send the audit summary to Matrix room !nSlDhIlsFlFubTCaWO:matrix.adamland.xyz using target `matrix:!nSlDhIlsFlFubTCaWO:matrix.adamland.xyz`. If the messaging tool is not available or the send fails, you MUST append a follow-up item to `'"${STATE_DIR}"$'/TODO.md` (see Step 6 in SKILL.md for the exact format). Do NOT silently skip the audit — either deliver it or record the failure.'
 
   handoff_ok=0
   for attempt in 1 2 3; do
@@ -294,8 +235,8 @@ for i in "${!new_memos[@]}"; do
         --skills "${HERMES_SKILL}" \
         --toolsets "${HERMES_TOOLSETS}" \
         --pass-session-id \
+        --yolo \
         --quiet \
-        "${provider_args[@]}" \
         --query "${prompt}" \
         >> "${LOG_FILE}" 2>&1; then
       handoff_ok=1

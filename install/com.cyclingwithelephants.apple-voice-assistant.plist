@@ -16,7 +16,7 @@
     </array>
 
     <key>StartInterval</key>
-    <integer>10</integer>
+    <integer>60</integer>
 
     <key>RunAtLoad</key>
     <true/>
@@ -32,8 +32,16 @@
 
     <key>EnvironmentVariables</key>
     <dict>
+        <key>HOME</key>
+        <string>__HOME__</string>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>/run/current-system/sw/bin:__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HERMES_HOME</key>
+        <string>__HOME__/.hermes</string>
+        <key>APPLE_VOICE_ASSISTANT_PYTHON</key>
+        <string>__HOME__/.hermes/hermes-agent/venv/bin/python</string>
+        <key>APPLE_VOICE_ASSISTANT_WHISPER_API_BASE</key>
+        <string>http://127.0.0.1:9099</string>
     </dict>
 </dict>
 </plist>
