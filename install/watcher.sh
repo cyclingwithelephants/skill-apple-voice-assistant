@@ -221,7 +221,6 @@ for i in "${!new_memos[@]}"; do
   log "new memo: ${memo_basename}"
 
   # Hand off to Hermes with a timeout. Don't pass --provider or --model;
-  # Hermes uses its config.yaml defaults + fallback_providers chain
   # Hermes uses its config.yaml defaults + fallback_providers chain.
   prompt=$'new voice memo at `'
   prompt+="${handoff_path}"

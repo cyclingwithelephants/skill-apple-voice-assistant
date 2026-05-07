@@ -9,7 +9,6 @@ store path.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil
@@ -150,27 +149,6 @@ def convert_qta(path: Path, normalized_name: str) -> Path | None:
     return None
 
 
-def pick_provider() -> tuple[str, str]:
-    provider = os.environ.get("APPLE_VOICE_ASSISTANT_PROVIDER", "")
-    model = os.environ.get("APPLE_VOICE_ASSISTANT_MODEL", "")
-    if provider or model:
-        return provider, model
-    auth_file = HERMES_HOME / "auth.json"
-    if not auth_file.exists():
-        return "llama-local", "qwen3.6-35b-a3b"
-    try:
-        auth = json.loads(auth_file.read_text(encoding="utf-8"))
-    except Exception:
-        return "llama-local", "qwen3.6-35b-a3b"
-    providers = auth.get("providers", {})
-    pool = auth.get("credential_pool", {})
-    if providers.get("openai-codex") or pool.get("openai-codex"):
-        return "openai-codex", "gpt-5.5"
-    if pool.get("openrouter"):
-        return "openrouter", "google/gemini-2.5-flash-preview:free"
-    return "llama-local", "qwen3.6-35b-a3b"
-
-
 def prompt_for(path: Path) -> str:
     prompt = f"new voice memo at `{path}`\n\nProcess it with apple-voice-assistant."
     if AUDIT_TARGET:
@@ -179,7 +157,10 @@ def prompt_for(path: Path) -> str:
 
 
 def hermes_cmd(path: Path) -> list[str]:
-    provider, model = pick_provider()
+    # Hermes uses its config.yaml defaults + fallback_providers chain.
+    # Override only if explicitly set via env vars.
+    provider = os.environ.get("APPLE_VOICE_ASSISTANT_PROVIDER", "")
+    model = os.environ.get("APPLE_VOICE_ASSISTANT_MODEL", "")
     cmd = [
         str(PYTHON_BIN),
         str(HERMES_HOME / "hermes-agent/hermes"),

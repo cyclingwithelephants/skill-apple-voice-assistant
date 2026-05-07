@@ -2,13 +2,9 @@
 
 A reminder, alarm, shopping-list addition, or time-sensitive personal task.
 
-STATE_DIR: `~/.local/state/apple-voice-assistant`
+**Read [`action_COMMON.md`](action_COMMON.md) first** — it defines the audit requirement, archive frontmatter update, processed JSON write, and audit steps that apply to every state.
 
 ---
-
-## Non-negotiable confirmation requirement
-
-The user requires an audit message every time a voice memo is processed, regardless of category or whether the action succeeded, failed, or only created a draft. Send it to the configured audit target (see `APPLE_VOICE_ASSISTANT_AUDIT_TARGET` env var). If delivery fails, append a FOLLOW-UP line to `~/.local/state/apple-voice-assistant/TODO.md` with enough detail to replay the missed confirmation later.
 
 ## Step 1: Interpret destination
 
@@ -44,20 +40,8 @@ Always append one line:
 - [ ] YYYY-MM-DD <short title> — Reminder/alarm/list item from voice memo. Archive: <archive_path>
 ```
 
-## Step 4: Update archive frontmatter
+## Step 4: Common steps
 
-Add:
-
-- `category: REMINDER_OR_ALARM`
-- `confidence: <high|medium|low>`
-- `action_taken: <created Reminder/list item and appended TODO fallback OR fallback only with error>`
-
-## Step 5: Write processed JSON
-
-Write `~/.local/state/apple-voice-assistant/processed/<memo_id>.json` with category `REMINDER_OR_ALARM` and disposition matching the action taken.
-
-## Step 6: Audit
-
-Send Matrix audit with transcript summary, reminder/list title, due date/list if any, confidence, action taken, archive path.
+Follow **Update archive frontmatter**, **Write processed JSON**, and **Audit** from [`action_COMMON.md`](action_COMMON.md). Include reminder/list title, due date/list if any.
 
 ## DONE

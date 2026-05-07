@@ -2,13 +2,9 @@
 
 No clear intent, ambiguous instruction, or low confidence. Message the user for clarification.
 
-STATE_DIR: `~/.local/state/apple-voice-assistant`
+**Read [`action_COMMON.md`](action_COMMON.md) first** — it defines the audit requirement, archive frontmatter update, processed JSON write, and audit steps that apply to every state.
 
 ---
-
-## Non-negotiable confirmation requirement
-
-The user requires an audit message every time a voice memo is processed, regardless of category or whether the action succeeded, failed, or only created a draft. Send it to the configured audit target (see `APPLE_VOICE_ASSISTANT_AUDIT_TARGET` env var). If delivery fails, append a FOLLOW-UP line to `~/.local/state/apple-voice-assistant/TODO.md` with enough detail to replay the missed confirmation later.
 
 ## Step 1: Send user the full transcript
 
@@ -38,38 +34,8 @@ Your message MUST end with a clear question asking the user what to do with this
 
 DO NOT take any action beyond sending the message and writing the processed JSON.
 
-## Step 3: Update archive frontmatter
+## Step 3: Common steps
 
-Update the YAML frontmatter in the archive file at `archive_path` (from the webhook payload) to add:
-
-- `category: UNKNOWN`
-- `confidence: <high|medium|low>`
-- `action_taken: <disposition summary>`
-
-Read the file, insert the new fields before the closing `---`, and write it back.
-
-## Step 4: Write processed JSON
-
-Write this JSON to `~/.local/state/apple-voice-assistant/processed/<memo_id>.json`:
-
-```json
-{
-  "memo_id": "<basename without extension>",
-  "source_filename": "<original filename>",
-  "source_mtime": "<source_mtime from webhook payload>",
-  "source_size_bytes": "<source_size_bytes from webhook payload>",
-  "category": "UNKNOWN",
-  "confidence": "<high|medium|low>",
-  "archive_path": "<archive_path from webhook payload>",
-  "disposition": "sent transcript to user for clarification",
-  "processed_at": "<ISO8601 timestamp>"
-}
-```
-
-## Step: Audit
-
-Send audit summary to the configured audit target.
-If Matrix is unavailable, append a FOLLOW-UP line to `~/.local/state/apple-voice-assistant/TODO.md`.
-Include: transcript summary, category, confidence, action taken, archive path.
+Follow **Update archive frontmatter**, **Write processed JSON**, and **Audit** from [`action_COMMON.md`](action_COMMON.md).
 
 ## DONE

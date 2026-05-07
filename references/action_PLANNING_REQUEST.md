@@ -2,13 +2,9 @@
 
 User asks for a project plan, approach, design, migration outline, or implementation proposal rather than immediate execution.
 
-STATE_DIR: `~/.local/state/apple-voice-assistant`
+**Read [`action_COMMON.md`](action_COMMON.md) first** — it defines the audit requirement, archive frontmatter update, processed JSON write, and audit steps that apply to every state.
 
 ---
-
-## Non-negotiable confirmation requirement
-
-The user requires an audit message every time a voice memo is processed, regardless of category or whether the action succeeded, failed, or only created a draft. Send it to the configured audit target (see `APPLE_VOICE_ASSISTANT_AUDIT_TARGET` env var). If delivery fails, append a FOLLOW-UP line to `~/.local/state/apple-voice-assistant/TODO.md` with enough detail to replay the missed confirmation later.
 
 ## Step 1: Do bounded discovery
 
@@ -32,20 +28,8 @@ Include:
 - risks/trade-offs
 - verification/acceptance checks
 
-## Step 3: Update archive frontmatter
+## Step 3: Common steps
 
-Add:
-
-- `category: PLANNING_REQUEST`
-- `confidence: <high|medium|low>`
-- `action_taken: created plan artifact at <path>`
-
-## Step 4: Write processed JSON
-
-Write `~/.local/state/apple-voice-assistant/processed/<memo_id>.json` with category `PLANNING_REQUEST` and disposition citing the plan path.
-
-## Step 5: Audit
-
-Send Matrix audit with the short recommendation, plan path, confidence, and archive path.
+Follow **Update archive frontmatter**, **Write processed JSON**, and **Audit** from [`action_COMMON.md`](action_COMMON.md). Cite the plan artifact path in `action_taken` and `disposition`.
 
 ## DONE

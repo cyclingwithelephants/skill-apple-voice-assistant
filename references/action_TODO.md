@@ -2,13 +2,9 @@
 
 A task to capture. Try to create an Apple Reminder (best-effort), then always log to TODO.md.
 
-STATE_DIR: `~/.local/state/apple-voice-assistant`
+**Read [`action_COMMON.md`](action_COMMON.md) first** — it defines the audit requirement, archive frontmatter update, processed JSON write, and audit steps that apply to every state.
 
 ---
-
-## Non-negotiable confirmation requirement
-
-The user requires an audit message every time a voice memo is processed, regardless of category or whether the action succeeded, failed, or only created a draft. Send it to the configured audit target (see `APPLE_VOICE_ASSISTANT_AUDIT_TARGET` env var). If delivery fails, append a FOLLOW-UP line to `~/.local/state/apple-voice-assistant/TODO.md` with enough detail to replay the missed confirmation later.
 
 ## Step 1: Try Apple Reminder via remindctl (best-effort)
 
@@ -26,8 +22,8 @@ If the memo mentions a due date, add `--due <date>`:
 /opt/homebrew/bin/remindctl add --title "<title>" --due "<YYYY-MM-DD>" --notes "<full transcript>"
 ```
 
-- `title`: descriptive title that preserves the key context from the memo — include the what, who, and why so the reminder is actionable without re-reading the transcript. Aim for 8-15 words. (e.g. "Compare CI node CPU allocation: fewer full-CPU vs more small-CPU nodes")
-- `notes`: the **full verbatim transcript** from the webhook payload — this is the reminder's description/body so the user can see exactly what they said
+- `title`: descriptive title that preserves the key context from the memo — include the what, who, and why so the reminder is actionable without re-reading the transcript. Aim for 8-15 words.
+- `notes`: the **full verbatim transcript** from the webhook payload
 - `due`: **must be `YYYY-MM-DD` format only** — natural language dates are unreliable
 - DO NOT specify a list — use the default list
 - Use the absolute path `/opt/homebrew/bin/remindctl` — Homebrew is not on PATH in daemon contexts
@@ -44,43 +40,10 @@ Append one line to `~/.local/state/apple-voice-assistant/TODO.md`:
 - [ ] YYYY-MM-DD <short title> — <one-line context>. Archive: <archive_path>
 ```
 
-- `title`: same descriptive title as the Reminder
-- `one-line context`: who, when, why — enough to act on later without re-reading the transcript
-
 If `~/.local/state/apple-voice-assistant/TODO.md` does not exist, create it before appending.
 
-## Step 3: Update archive frontmatter
+## Step 3: Common steps
 
-Update the YAML frontmatter in the archive file at `archive_path` (from the webhook payload) to add:
-
-- `category: TODO`
-- `confidence: <high|medium|low>`
-- `action_taken: <disposition summary>`
-
-Read the file, insert the new fields before the closing `---`, and write it back.
-
-## Step 4: Write processed JSON
-
-Write this JSON to `~/.local/state/apple-voice-assistant/processed/<memo_id>.json`:
-
-```json
-{
-  "memo_id": "<basename without extension>",
-  "source_filename": "<original filename>",
-  "source_mtime": "<source_mtime from webhook payload>",
-  "source_size_bytes": "<source_size_bytes from webhook payload>",
-  "category": "TODO",
-  "confidence": "<high|medium|low>",
-  "archive_path": "<archive_path from webhook payload>",
-  "disposition": "created Apple Reminder + appended to TODO.md",
-  "processed_at": "<ISO8601 timestamp>"
-}
-```
-
-## Step: Audit
-
-Send audit summary to the configured audit target.
-If Matrix is unavailable, append a FOLLOW-UP line to `~/.local/state/apple-voice-assistant/TODO.md`.
-Include: transcript summary, category, confidence, action taken, archive path.
+Follow **Update archive frontmatter**, **Write processed JSON**, and **Audit** from [`action_COMMON.md`](action_COMMON.md).
 
 ## DONE

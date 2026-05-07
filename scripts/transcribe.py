@@ -105,11 +105,39 @@ def faster_whisper(audio: Path, output: Path) -> bool:
     return True
 
 
-def openai_whisper(audio: Path, output: Path) -> bool:
-    helper = os.environ.get("APPLE_VOICE_ASSISTANT_OPENAI_WHISPER_SCRIPT", "/opt/homebrew/lib/node_modules/Hermes/skills/openai-whisper-api/scripts/transcribe.sh")
-    if not os.environ.get("OPENAI_API_KEY") or not Path(helper).exists():
+def openai_api(audio: Path, output: Path) -> bool:
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
         return False
-    return subprocess.run(["bash", helper, str(audio), "--out", str(output)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    boundary = f"----apple-voice-assistant-{uuid.uuid4().hex}"
+    body = b"".join([
+        f"--{boundary}\r\n".encode(),
+        f'Content-Disposition: form-data; name="file"; filename="{audio.name}"\r\n'.encode(),
+        b"Content-Type: application/octet-stream\r\n\r\n",
+        audio.read_bytes(),
+        f"\r\n--{boundary}\r\n".encode(),
+        b'Content-Disposition: form-data; name="model"\r\n\r\ngpt-4o-transcribe\r\n',
+        f"--{boundary}--\r\n".encode(),
+    ])
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/audio/transcriptions",
+        data=body,
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            text = json.loads(resp.read().decode()).get("text", "").strip()
+    except Exception:
+        return False
+    if not text:
+        return False
+    write(text, output)
+    print(f"Transcribed using OpenAI API (gpt-4o-transcribe)", file=sys.stderr)
+    return True
 
 
 def main() -> int:
@@ -118,7 +146,7 @@ def main() -> int:
         return 2
     audio = Path(sys.argv[1])
     output = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(tempfile.gettempdir()) / "apple-voice-assistant-transcript.txt"
-    for method in (synthetic, local_api, swift, mlx_whisper, faster_whisper, openai_whisper):
+    for method in (synthetic, local_api, swift, mlx_whisper, faster_whisper, openai_api):
         try:
             if method(audio, output):
                 return 0
