@@ -1,10 +1,19 @@
 # Archive Format
 
-Specification for Step 4 of the skill — archiving audio and transcripts.
+Specification for the voice memo archive. Archiving happens in two phases across two components.
+
+## Two-phase archiving
+
+| Phase | Component                   | Fields written                                                                                           |
+| ----- | --------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 1     | Watcher (`process-memo.py`) | `memo_id`, `source_path`, `source_mtime`, `source_size_bytes`, `recorded_at`, `archived_at` + audio copy |
+| 2     | Hermes (SKILL.md Step 4)    | `category`, `confidence`, `type`, `action_taken`                                                         |
+
+The watcher creates the archive file with Phase 1 fields. Hermes updates the same file's YAML frontmatter to add Phase 2 fields after classification and action.
 
 ## Directory layout
 
-The skill's own directory is the active Hermes workspace's symlinked skill path, typically `${HERMES_HOME:-$HOME/.hermes}/skills/apple/apple-voice-assistant/`. Archive under its `data/` subtree:
+Archives live under `~/.local/state/apple-voice-assistant/data/`:
 
 ```
 data/YYYY/MM/DD/HH-MM-SS-<slug>.m4a      # copy of the original audio
@@ -13,7 +22,7 @@ data/YYYY/MM/DD/HH-MM-SS-<slug>.md       # transcript + metadata
 
 Example: `data/2026/04/19/08-30-45-grocery-list-for-saturday.m4a` + `data/2026/04/19/08-30-45-grocery-list-for-saturday.md`
 
-Create missing intermediate directories with `mkdir -p`. The audio and transcript must share the same `HH-MM-SS-<slug>` stem — never drift.
+The audio and transcript must share the same `HH-MM-SS-<slug>` stem — never drift.
 
 ## Deriving the timestamp
 
@@ -23,13 +32,10 @@ If the filename doesn't follow that pattern, fall back to the file's mtime via `
 
 ## Deriving the slug
 
-Generate a short human-readable slug from the transcript so archived files are self-describing at a glance.
-
-Rules:
+The watcher generates a deterministic slug from the first ~5 words of the transcript. Rules:
 
 - 2–6 words, all lowercase, hyphen-separated
-- Describe the topic or action, not the form (good: `grocery-list-for-saturday`, bad: `voice-memo-about-groceries`)
-- Strip all non-ASCII-alphanumeric characters before hyphenating (spaces, punctuation, emoji, accents → gone)
+- Strip all non-ASCII-alphanumeric characters before hyphenating
 - Cap total slug length at 50 characters — truncate at the nearest hyphen rather than mid-word
 - If the transcript is too empty or noisy to produce a meaningful slug, use `untitled`
 
@@ -44,13 +50,13 @@ A Markdown file with YAML frontmatter followed by the full transcript body:
 ```markdown
 ---
 memo_id: "20260419 083045"
-source_path: /Users/<user>/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/20260419 083045.m4a
+source_path: ~/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/20260419 083045.m4a
 source_mtime: 1745053845
 source_size_bytes: 234567
 recorded_at: 2026-04-19T08:30:45Z
 archived_at: 2026-04-19T08:31:02Z
 duration_seconds: 47
-category: TODO_ADAM
+category: TODO
 confidence: high
 type: memo
 action_taken: created Apple Reminder
@@ -59,7 +65,7 @@ action_taken: created Apple Reminder
 <full transcript verbatim>
 ```
 
-### Required fields
+### Phase 1 fields (written by watcher)
 
 - `memo_id` — basename without extension, used for dedup
 - `source_path` — absolute path to the original `.m4a`
@@ -67,16 +73,21 @@ action_taken: created Apple Reminder
 - `source_size_bytes` — file size in bytes
 - `recorded_at` — derived from filename or mtime
 - `archived_at` — current time when archiving
-- `category` — the classification state
-- `confidence` — high/medium/low
 
-### Optional fields
+### Phase 2 fields (written by Hermes in Step 4)
+
+- `category` — the classification state (required)
+- `confidence` — high/medium/low (required)
+- `type` — semantic tag: `memo` (default), `idea`, `research` (optional)
+- `action_taken` — filled in after Step 5 completes, update the file after acting (optional)
+
+### Other optional fields
 
 - `duration_seconds` — audio duration if determinable
-- `type` — semantic tag: `memo` (default), `journal`, `idea`, `research`, `message-draft`
-- `action_taken` — filled in after Step 5 completes (update the file after acting)
 - `transcript_confidence` — if the runtime provides a transcription confidence score
 
 ## If archiving fails
 
-If the `cp` or transcript write fails (disk full, permission denied, etc.), log it and continue to Step 5 anyway — the action the user intended should still happen. Include the failure in the audit message.
+Phase 1 (watcher): if the copy or transcript write fails, the watcher logs the error and does not fire the webhook — the memo will be retried on the next run.
+
+Phase 2 (Hermes): if updating the archive frontmatter fails, log it and continue to Step 5 anyway — the action the user intended should still happen. Include the failure in the audit message.

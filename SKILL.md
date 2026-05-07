@@ -6,48 +6,33 @@ homepage: https://github.com/cyclingwithelephants/skill-apple-voice-assistant
 
 # Apple Voice Assistant
 
-You process iPhone voice memos on behalf of the user. A launchd watcher on the Mac fires you whenever a new `.m4a` appears in the iCloud Voice Memos directory. The launchd job invokes you with a message of the form:
+You process iPhone voice memos on behalf of the user. A deterministic Python watcher (`scripts/process-memo.py`) handles file discovery, transcription, deduplication, and archiving, then POSTs a webhook to the Hermes gateway with the transcript and metadata. You receive the webhook payload and handle classification, action dispatch, and audit.
 
-> new voice memo at `/absolute/path/to/recording.m4a`
+## Step 0 — Webhook payload
 
-## Step 0 — Watcher/TCC handling on macOS/Nix
+The watcher POSTs a JSON payload to your webhook endpoint. You receive these fields:
 
-The launchd watcher may run without the same TCC privacy grant as an interactive shell. On macOS, shell globbing, `ls`, and other non-approved processes can fail to read the Voice Memos container even after the configured Python runtime has been granted Full Disk Access / Files & Folders access.
+| Field               | Type   | Description                                                 |
+| ------------------- | ------ | ----------------------------------------------------------- |
+| `memo_id`           | string | Voice Memos filename stem, e.g. `"20260419 083045"`         |
+| `transcript`        | string | Full transcript text (already transcribed by the watcher)   |
+| `archive_path`      | string | Absolute path to the archived transcript `.md` file         |
+| `source_filename`   | string | Original Voice Memos filename, e.g. `"20260419 083045.m4a"` |
+| `source_mtime`      | int    | Unix timestamp of the original file's mtime                 |
+| `source_size_bytes` | int    | Size of the original file in bytes                          |
+| `timestamp`         | string | ISO 8601 timestamp of when the webhook was fired            |
 
-Use the configured Python runtime for watcher-side discovery/copy work. The nix-darwin module exposes this as `services.apple-voice-assistant.python`, and the manual installer uses the Python running the installed watcher.
+The watcher has already handled: file discovery, iCloud sync stability checks, `.qta` → `.m4a` conversion, transcription (via local Whisper API), deduplication (via `seen.txt` + processed JSON), and Phase 1 archiving (audio copy + transcript with deterministic frontmatter).
 
-Preferred watcher pattern:
+## Step 1 — Validate the payload
 
-1. Use Python to enumerate the configured Voice Memos recordings directory.
-2. Skip directories and `.icloud` placeholders.
-3. Copy the source audio into an unprotected staging directory before invoking shell tools:
-   ```text
-   ~/.local/state/apple-voice-assistant/tmp-audio/
-   ```
-4. Process the staged copy, not the protected Voice Memos path.
-5. Voice Memos may surface new recordings as `.qta`; convert/archive them as normal audio before transcription (the existing watcher has handled `.qta -> .m4a`).
+Extract the transcript from the webhook payload. Validate before proceeding:
 
-## Step 1 — Load the audio
+- `transcript` is non-empty
+- `memo_id` is present
+- `archive_path` is present
 
-Extract the absolute path from the triggering message (e.g. `/Users/<user>/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/20260419 083045.m4a` or a staged copy under `~/.local/state/apple-voice-assistant/tmp-audio/`).
-
-**Transcription priority:**
-1. First check if a synthetic transcript exists at `<m4a-path>.transcript.txt`. If yes, use that directly.
-2. Explicitly read the `.m4a` file first. If the runtime materializes a transcript from that read, use it as the memo body.
-3. If `read` returns raw/binary M4A content, use the local transcription script which implements the priority order:
-   ```bash
-   ${APPLE_VOICE_ASSISTANT_PYTHON:-python3} ${HERMES_HOME:-$HOME/.hermes}/skills/apple/apple-voice-assistant/scripts/transcribe.py /absolute/path/to/recording.m4a /tmp/apple-voice-assistant-transcript.txt
-   ```
-   Then read `/tmp/apple-voice-assistant-transcript.txt`.
-4. If the transcription script fails, send the user a message explaining that transcription failed and stop.
-
-Validate before proceeding:
-
-- path exists and is readable
-- file ends in `.m4a` by the time transcription starts (raw `.qta` inputs from Voice Memos should be converted to `.m4a` first; skip `.icloud` placeholders — they mean iCloud hasn't finished syncing yet, and the launchd watcher will retry on the next change)
-- transcript is non-empty
-
-If any check fails, send the user a message explaining the problem and stop.
+If any check fails, send the user an audit message explaining the problem and stop.
 
 ## Step 2 — Classify the transcript
 
@@ -55,29 +40,34 @@ Assign exactly one **state** and one **confidence level**.
 
 ### States
 
-| State                | Meaning                                                                                                         |
-| -------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `INSTRUCTION_DIRECT` | A direct instruction for you to carry out now                                                                   |
-| `INSTRUCTION_ADD`    | User is teaching a new rule, pattern, or example for this skill itself                                          |
-| `INSTRUCTION_UNSURE` | Sounds like a direct instruction but you're not confident — ambiguous scope, missing context, or novel phrasing |
-| `TODO_ADAM`          | A task the user wants to do themselves later                                                                    |
-| `TODO_ASSISTANT`     | A task the user wants you to do later (not now)                                                                 |
-| `MEMORY_NOTE`        | A fact to persist — about a person, project, system, or preference                                              |
-| `JOURNAL_NOTE`       | Raw thoughts, reflections, life log — no action needed beyond archiving                                         |
-| `IDEA_CAPTURE`       | A product, project, or creative idea to capture for later                                                       |
-| `RESEARCH_REQUEST`   | "Look into X" — create a research task, do NOT act immediately                                                  |
-| `MESSAGE_DRAFT`      | "Send/tell/reply to Y" — draft a message, never send without explicit confirmation                              |
-| `TRANSCRIBE_ONLY`    | User explicitly says "just save this" or similar — archive only, no action                                      |
-| `UNKNOWN`            | No clear intent — doesn't match any other state                                                                 |
+| State                | Meaning                                                                |
+| -------------------- | ---------------------------------------------------------------------- |
+| `EXTERNAL_MESSAGE_DRAFT` | User wants a message/reply drafted for another person or external channel; never send without explicit confirmation |
+| `REMINDER_OR_ALARM`      | Time-sensitive reminder/alarm/shopping-list item; create Apple Reminder/List item and log fallback state            |
+| `QUESTION_ANSWER`        | User asks a factual/how-to/explanatory question; answer directly and archive                                         |
+| `IMPLEMENTATION_TASK`    | User asks you to build/change/test something now; implement or create concrete artifact, then report                 |
+| `PLANNING_REQUEST`       | User asks for a project plan/approach/design, not immediate implementation                                          |
+| `INSTRUCTION_DIRECT`     | Legacy/general direct instruction not covered by a narrower state                                                   |
+| `INSTRUCTION`            | User is teaching a new rule, pattern, or example for this skill itself                                              |
+| `TODO`                   | Legacy/general task capture — create an Apple Reminder and log to TODO.md                                           |
+| `MEMORY_NOTE`            | A fact to persist — about a person, project, system, or preference                                                  |
+| `IDEA_CAPTURE`           | A product, project, or creative idea to capture in memory                                                           |
+| `RESEARCH_REQUEST`       | "Look into X" — create a research task, do NOT act immediately                                                     |
+| `UNKNOWN`                | No clear intent or ambiguous instruction — message the user                                                         |
 
-`UNKNOWN` is the **classification training pipeline**. Its purpose is to collect memos that don't fit existing states so patterns can be discovered over time and new states or rules proposed. It is not a generic fallback bin — classify into a specific state whenever possible, and only use `UNKNOWN` when the memo genuinely doesn't match anything above.
+`UNKNOWN` is the catch-all. Use it when intent is genuinely unclear, when a memo sounds like an instruction but scope or meaning is ambiguous, or when confidence is too low to act. Always message the user for clarification. Classify into a specific state whenever possible.
 
 ### Classification biases
 
-- Prefer `INSTRUCTION_UNSURE` over `INSTRUCTION_DIRECT` when in doubt — cheaper to ask than to act wrongly.
-- Prefer `TODO_ADAM` over `TODO_ASSISTANT` when the actor is unclear — Adam defaults to owning his own work.
-- Prefer `MEMORY_NOTE` over `JOURNAL_NOTE` when the memo contains a concrete fact, even if it's embedded in a reflection.
-- Prefer a specific state over `UNKNOWN` — `UNKNOWN` is for genuinely unclassifiable memos, not "I'm not sure."
+- Prefer narrow categories over legacy catch-alls: `EXTERNAL_MESSAGE_DRAFT`, `REMINDER_OR_ALARM`, `QUESTION_ANSWER`, `IMPLEMENTATION_TASK`, or `PLANNING_REQUEST` before `INSTRUCTION_DIRECT`/`TODO`.
+- Prefer `EXTERNAL_MESSAGE_DRAFT` for any outbound message draft, even if the user says "message X". Draft only; ask for confirmation before sending.
+- Prefer `REMINDER_OR_ALARM` for reminders, shopping-list additions, alarms, and time-sensitive personal tasks.
+- Prefer `QUESTION_ANSWER` when the intended action is just answering/explaining.
+- Prefer `IMPLEMENTATION_TASK` when code/config/file changes or tests should happen now.
+- Prefer `PLANNING_REQUEST` when the output should be a plan/design/approach document rather than immediate implementation.
+- Prefer `UNKNOWN` over action categories when scope is genuinely unclear — cheaper to ask than to act wrongly.
+- Prefer `MEMORY_NOTE` over `IDEA_CAPTURE` when the memo contains a concrete fact, even if framed as an idea.
+- Prefer a specific state over `UNKNOWN` — but when genuinely unsure, `UNKNOWN` + messaging the user is always safe.
 
 See [`references/classification-examples.md`](references/classification-examples.md) for worked examples covering common and edge-case phrasings.
 
@@ -85,116 +75,107 @@ See [`references/classification-examples.md`](references/classification-examples
 
 Rate your classification confidence as `high`, `medium`, or `low`.
 
-| Confidence | Meaning                                               | Constraint                                                                                                                                                               |
-| ---------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `high`     | Clear intent, unambiguous phrasing                    | No restrictions                                                                                                                                                          |
-| `medium`   | Likely correct but some ambiguity                     | Proceed, but note uncertainty in audit message                                                                                                                           |
-| `low`      | Guessing — transcript is noisy, garbled, or ambiguous | **Never perform external or irreversible actions.** Escalate to draft/confirm. Treat as `INSTRUCTION_UNSURE` if it looked like an instruction, or archive-only otherwise |
+| Confidence | Meaning                                               | Constraint                                                                                                       |
+| ---------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `high`     | Clear intent, unambiguous phrasing                    | No restrictions                                                                                                  |
+| `medium`   | Likely correct but some ambiguity                     | Proceed, but note uncertainty in audit message                                                                   |
+| `low`      | Guessing — transcript is noisy, garbled, or ambiguous | **Never perform external or irreversible actions.** Classify as `UNKNOWN` and message the user for clarification |
 
 Voice-to-text errors are common. A misheard word can completely change intent. When confidence is low, the cost of asking is always lower than the cost of acting wrongly.
 
-## Step 3 — Check for duplicates
+## Step 3 — Deduplication (handled by watcher)
 
-Before archiving or acting, check whether this memo has already been processed. The watcher writes an idempotency record for each processed memo at:
+The watcher deduplicates before firing the webhook — via `seen.txt` and processed JSON checks. If you received a webhook, the memo is new. Proceed.
 
-```
-~/.local/state/apple-voice-assistant/processed/<memo_id>.json
-```
+## Step 4 — Update the archive
 
-Where `<memo_id>` is derived from the source filename (basename without extension). If a record already exists with the same `source_mtime` and `source_size_bytes`, skip this memo — it's a duplicate triggered by iCloud sync churn.
+The watcher has already archived the audio and transcript to `archive_path` with Phase 1 frontmatter (deterministic fields: `memo_id`, `source_path`, `source_mtime`, `source_size_bytes`, `recorded_at`, `archived_at`).
 
-If no record exists, create one after Step 5 completes:
+Update the archive file at `archive_path` to add classification metadata — insert these fields into the existing YAML frontmatter:
 
-```json
-{
-  "memo_id": "20260419 083045",
-  "source_filename": "20260419 083045.m4a",
-  "source_mtime": 1745053845,
-  "source_size_bytes": 234567,
-  "category": "TODO_ADAM",
-  "confidence": "high",
-  "archive_path": "data/2026/04/19/08-30-45-grocery-list-for-saturday.md",
-  "disposition": "created Apple Reminder",
-  "processed_at": "2026-04-19T08:31:02Z"
-}
-```
+- `category` — the state from Step 2
+- `confidence` — high/medium/low from Step 2
+- `type` — semantic tag: `memo` (default), `idea`, `research`
+- `action_taken` — fill in after Step 5 completes (update the file after acting)
 
-## Step 4 — Archive the audio and transcript
-
-Copy the raw audio and write a matching transcript file into this skill's `data/` tree. This gives a durable, greppable history independent of Voice Memos / iCloud.
-
-See [`references/archive-format.md`](references/archive-format.md) for the full archive specification (directory layout, slug rules, transcript frontmatter fields, failure handling).
+See [`references/archive-format.md`](references/archive-format.md) for the full archive specification.
 
 ## Step 5 — Act on the category
 
-Each state maps to a specific action. See [`references/actions.md`](references/actions.md) for the full action specification.
+STOP. Read the action file for your classified state. The filename follows this pattern exactly:
+
+```
+references/action_<STATE>.md
+```
+
+Replace `<STATE>` with the state you assigned in Step 2. Example: if you classified as `TODO`, read `references/action_TODO.md`.
+
+Read that file NOW. Follow its numbered steps. Do NOT skip any step. When the file says DONE, you are done.
 
 ### Safety rules (apply to ALL states)
 
-1. **Never send, post, or publish externally without confirmation.** Any action that sends a message to another person, creates a public GitHub issue outside this repo, posts to a channel, or emails — default to **draft + confirm**. This applies to `MESSAGE_DRAFT` by definition, but also to any `INSTRUCTION_DIRECT` that involves external communication. Voice memos are too easy to underspecify.
+1. **NEVER send, post, or publish externally without confirmation.** Draft + confirm for any external communication.
+2. **Low confidence = no irreversible actions.** Archive only and ask for clarification.
+3. **NEVER delete or move the source `.m4a`.** iCloud owns that lifecycle.
 
-2. **Low confidence = no irreversible actions.** If confidence is `low`, do not execute instructions, create external resources, or send messages. Archive the transcript and ask the user for clarification.
+## Intake status report workflow
 
-3. **Never delete or move the source `.m4a`.** iCloud owns that lifecycle; archiving is always a copy.
+Use this when Adam asks for a status report, summary, audit, or "what's actionable" view of voice memo intake.
 
-## Step 6 — Audit trail
+1. Inspect live state, do not answer from memory:
+   - `~/.local/state/apple-voice-assistant/data/**/*.md` for archived transcripts, frontmatter category/confidence/type/action_taken, and archive paths
+   - `~/.local/state/apple-voice-assistant/processed/*.json` for processed metadata
+   - `~/.local/state/apple-voice-assistant/seen.txt` plus the Voice Memos recordings directory to detect unseen/pending audio
+   - `~/.local/state/apple-voice-assistant/TODO.md` for reliable task/research/follow-up fallback records
+   - Apple Reminders via `/opt/homebrew/bin/remindctl all` when assessing TODO/reminder actions
+   - `~/.local/state/apple-voice-assistant/watcher.log` for recent errors, webhook failures, and rate-limit symptoms
+2. Report pipeline health first: total recordings, seen/unseen, archive count, processed count, missing classification/action metadata, newest processed memo, and watcher health/errors.
+3. Group archived memos by category and confidence. Normalize quoted categories such as `"INSTRUCTION_DIRECT"` when summarizing.
+4. Separate outcomes into useful buckets:
+   - actionable personal tasks/reminders
+   - research requests logged but not yet executed
+   - engineering/project tasks or generated artifacts/plans/tests
+   - external message drafts needing explicit confirmation before sending
+   - captured ideas/memory notes that are not currently tasks
+   - UNKNOWN/noise/test memos needing clarification or no action
+5. Call out duplicates and stale follow-up mess explicitly. Common examples: duplicated TODO.md research entries, duplicated Apple Reminders, and Matrix 429 audit failures written as FOLLOW-UP lines.
+6. If asked to clean/dedupe the intake state, preserve source archives and processed JSON, but rewrite `TODO.md` into human-useful sections: active tasks, external drafts awaiting confirmation, and captured/non-task notes. Remove Matrix 429 FOLLOW-UP noise after confirming the underlying action already happened or is captured elsewhere.
+7. When deduping Apple Reminders, only delete clearly duplicated voice-memo fallout items. Prefer keeping the shorter canonical reminder title when duplicates differ (for example keep `Experiment with CI node CPU allocation`, remove `Create lab experiment comparing CI node CPU allocation`). Verify with `remindctl all --json` before and after deletion.
+8. Include concrete artifact paths for plans/tests/archives when they matter, but keep the final report human-prioritized rather than dumping every path.
+9. End with a short opinionated priority list of next cleanup/actions.
 
-Every run must produce at least one message to the user so nothing disappears silently. Use whatever messaging channel the runtime provides (e.g. the primary notification channel configured in the host). Do not hardcode a specific channel.
+## Operational notes
 
-The audit message should include: **full verbatim transcript**, transcript summary, category, confidence, action taken, and archive path. Do not replace the transcript with only a summary; include both.
-
-If an action fails (e.g. `gh` not authed, Reminders permission denied, archive write failed), send a message with the error and the raw transcript.
-
-**If the message send itself fails** (network error, channel misconfigured, etc.), append a self-chase item to `TODO.md` at the root of this skill's directory:
-
-```
-- [ ] YYYY-MM-DD FOLLOW-UP — failed to notify user about memo. Archive: data/YYYY/MM/DD/HH-MM-SS-<slug>.md. Category: <STATE>. Confidence: <level>. Action taken: <summary or "none">. Error: <error>.
-```
-
-On every subsequent run, before Step 1, scan `TODO.md` for `FOLLOW-UP` items and include an "unresolved follow-ups" section in the audit message. Once the user has been told, strike the line through (`~~...~~`) rather than deleting it — keep the audit history.
-
-## Guidance
-
-- Treat the transcript as the source of truth. Don't re-interpret from the filename.
-- Keep audit messages complete — full verbatim transcript + transcript summary + category + confidence + action taken + archive path.
-- When writing GitHub issues or TODO lines, reference the archived transcript path (`data/YYYY/MM/DD/HH-MM-SS-<slug>.md`) rather than the original Voice Memos path — the archive is stable, the source may move or be deleted by iCloud.
-- Don't ask for confirmation before running `INSTRUCTION_DIRECT` (that's what `INSTRUCTION_UNSURE` is for) — **unless** it involves external communication (see Safety rule 1).
-- Always process the steps in order: load → classify → dedup → archive → act → audit. A failed archive never blocks the action step; a failed action never blocks the audit step.
-
-## Operational watcher notes
-
-- launchd may run the watcher with a sparse environment. Set `HOME`,
-  `HERMES_HOME`, and a `PATH` containing whichever package-manager path provides
-  `timeout` (`/run/current-system/sw/bin`, `/opt/homebrew/bin`, or similar).
-- macOS TCC access to the Voice Memos container can differ between shell tools
-  and Python. The watcher intentionally enumerates and copies Voice Memos with
-  the Hermes Python interpreter, then processes the staged copy from
-  `~/.local/state/apple-voice-assistant/tmp-audio/`.
-- If the Hermes Python path differs from
-  `${HERMES_HOME:-$HOME/.hermes}/hermes-agent/venv/bin/python`, set
-  `APPLE_VOICE_ASSISTANT_PYTHON`.
-- To force a provider/model for the Hermes handoff, set
-  `APPLE_VOICE_ASSISTANT_PROVIDER` and/or `APPLE_VOICE_ASSISTANT_MODEL`.
-  Otherwise the watcher picks an available credential-backed provider from
-  `auth.json`, then falls back to local providers.
-- To force audit delivery to a specific messaging target from non-interactive
-  sessions, set `APPLE_VOICE_ASSISTANT_AUDIT_TARGET`, for example
-  `matrix:!room:example.org`. Without this, the skill asks Hermes to use the
-  configured messaging channel and falls back to stdout.
+- **User confirmation requirement.** Adam wants a Matrix confirmation/audit message every time a voice memo is processed, regardless of category or whether the action succeeded, failed, or only created a draft. Use `matrix:!nSlDhIlsFlFubTCaWO:matrix.adamland.xyz`. If Matrix delivery fails, append a FOLLOW-UP line to `~/.local/state/apple-voice-assistant/TODO.md` with enough detail to replay the missed confirmation later.
+- **Two-component architecture.** The Python watcher (`scripts/process-memo.py`) runs as a launchd daemon, handles all I/O (discovery, transcription, archiving), and POSTs to the Hermes webhook. You receive the webhook payload and handle classification, action dispatch, and audit.
+- The watcher runs as a LaunchDaemon (starts at boot, before login) — it only does file I/O and webhook POSTs, no GUI access needed. It needs `HOME` set and a `PATH` that includes `/run/current-system/sw/bin`.
+- Voice Memos TCC access: the watcher uses the Hermes venv Python interpreter to enumerate the protected Voice Memos directory, then copies files to `~/.local/state/apple-voice-assistant/tmp-audio/` before processing.
+- Hermes model selection is controlled by `~/.hermes/config.yaml` (default model + `fallback_providers` chain), not by the watcher or webhook config.
+- The webhook subscription is registered by `scripts/setup-webhook.sh`. Run it once after deploying, or re-run when the prompt template changes. Subscriptions persist across gateway restarts.
+- For Matrix audit delivery, use the explicit target `matrix:!nSlDhIlsFlFubTCaWO:matrix.adamland.xyz`.
 
 ## End-to-end verification recipe
 
-Use a synthetic memo rather than waiting on iCloud:
+Use a synthetic memo rather than waiting on iCloud. Two stages to verify:
+
+### Stage 1 — Watcher (deterministic)
 
 1. Copy a known-good Voice Memos audio file (`.qta` is fine) into the Voice Memos recordings directory with a unique filename like `YYYYMMDD HHMMSS-HERMESTEST.qta`.
-2. Add a matching synthetic transcript. If the watcher converts `.qta` to a staged `.m4a`, the transcript must match the staged converted path exactly, including suffix case, for example:
+2. Add a matching synthetic transcript at the staged copy path:
    ```text
-   ~/.local/state/apple-voice-assistant/tmp-audio/2026-04-25-00-00-01-HERMESTEST.m4a.transcript.txt
+   ~/.local/state/apple-voice-assistant/tmp-audio/YYYYMMDD HHMMSS-HERMESTEST.m4a.transcript.txt
    ```
 3. Remove that basename from `~/.local/state/apple-voice-assistant/seen.txt` and remove any old processed JSON for the same memo id.
-4. Run or kick the watcher, then tail `~/.local/state/apple-voice-assistant/watcher.log` until it prints a session id and final audit.
-5. Verify all three artifacts:
-   - `~/.local/state/apple-voice-assistant/processed/<memo_id>.json`
-   - `~/.hermes/skills/apple/apple-voice-assistant/data/YYYY/MM/DD/<slug>.md`
-   - matching archived `.m4a`
-6. Verify launchd health with `launchctl print gui/$(id -u)/com.cyclingwithelephants.apple-voice-assistant`; `state = not running` with `last exit code = 0` is healthy because this watcher is short-lived.
+4. Run or kick the watcher, then tail `~/.local/state/apple-voice-assistant/watcher.log`.
+5. Verify watcher artifacts:
+   - Archive transcript: `~/.local/state/apple-voice-assistant/data/YYYY/MM/DD/HH-MM-SS-<slug>.md` (Phase 1 frontmatter only)
+   - Archive audio: matching `.m4a` in the same directory
+   - Log shows: `archived`, `webhook fired` with status 200
+
+### Stage 2 — Hermes (LLM)
+
+6. Check Hermes gateway logs — confirm webhook received, skill session started.
+7. Check Matrix room — confirm audit message with classification, action taken, archive path.
+8. Re-read the archive file — confirm Phase 2 fields added (`category`, `confidence`, `type`, `action_taken`).
+9. Verify processed JSON at `~/.local/state/apple-voice-assistant/processed/<memo_id>.json`.
+10. Verify launchd health: `launchctl print system/com.cyclingwithelephants.apple-voice-assistant`; `state = not running` with `last exit code = 0` is healthy (short-lived daemon).
