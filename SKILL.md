@@ -141,7 +141,7 @@ Each state maps to a specific action. See [`references/actions.md`](references/a
 
 Every run must produce at least one message to the user so nothing disappears silently. Use whatever messaging channel the runtime provides (e.g. the primary notification channel configured in the host). Do not hardcode a specific channel.
 
-The audit message should include: transcript summary, category, confidence, action taken, and archive path.
+The audit message should include: **full verbatim transcript**, transcript summary, category, confidence, action taken, and archive path. Do not replace the transcript with only a summary; include both.
 
 If an action fails (e.g. `gh` not authed, Reminders permission denied, archive write failed), send a message with the error and the raw transcript.
 
@@ -156,7 +156,7 @@ On every subsequent run, before Step 1, scan `TODO.md` for `FOLLOW-UP` items and
 ## Guidance
 
 - Treat the transcript as the source of truth. Don't re-interpret from the filename.
-- Keep audit messages short — transcript summary + category + confidence + action taken + archive path.
+- Keep audit messages complete — full verbatim transcript + transcript summary + category + confidence + action taken + archive path.
 - When writing GitHub issues or TODO lines, reference the archived transcript path (`data/YYYY/MM/DD/HH-MM-SS-<slug>.md`) rather than the original Voice Memos path — the archive is stable, the source may move or be deleted by iCloud.
 - Don't ask for confirmation before running `INSTRUCTION_DIRECT` (that's what `INSTRUCTION_UNSURE` is for) — **unless** it involves external communication (see Safety rule 1).
 - Always process the steps in order: load → classify → dedup → archive → act → audit. A failed archive never blocks the action step; a failed action never blocks the audit step.
