@@ -2,6 +2,17 @@
 
 Hermes skill that processes iPhone Voice Memos. A launchd-triggered Python watcher discovers new recordings synced via iCloud, transcribes them locally, archives them, and POSTs a webhook to the Hermes gateway. Hermes then classifies intent, dispatches actions, and audits results.
 
+## Core design principle: self-improving taxonomy
+
+This skill is designed to discover new use cases and evolve its own classification over time. The taxonomy is not fixed — it grows through a teaching loop:
+
+1. **`UNKNOWN` as a signal, not a dead end.** When a memo doesn't fit any existing state, the agent classifies it as `UNKNOWN` and asks the user for clarification. That clarification becomes training data for better future classification.
+2. **`INSTRUCTION` state for self-modification.** When the user says things like "from now on, treat X as Y" or "add a rule that...", the agent records a concrete proposal in `PROPOSALS.md` with a suggested patch to `SKILL.md` or `references/classification-examples.md`. The user reviews and merges these proposals — the skill literally rewrites its own classification rules.
+3. **`references/classification-examples.md` is living ground truth.** This file grows over time as the teaching loop proposes new patterns. Every ambiguous memo that gets resolved becomes a new worked example that prevents the same ambiguity next time.
+4. **New states can be added.** The current 12 states emerged from real usage. When a pattern of memos consistently doesn't fit existing buckets, the right response is to propose a new state with its own action file in `references/action_<STATE>.md`.
+
+When working on this skill, preserve and strengthen this feedback loop. Don't hardcode behaviour that should be learned. Prefer adding classification examples over adding code branches. The goal is an agent that gets better at understanding its user over time without code changes.
+
 ## Architecture
 
 ```
