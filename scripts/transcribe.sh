@@ -2,7 +2,7 @@
 # Transcription fallback for apple-voice-assistant skill
 # Priority:
 # 1) synthetic transcript
-# 2) local Whisper API managed by radish
+# 2) local Whisper API
 # 3) mlx-whisper (M4 GPU)
 # 4) faster-whisper (CPU)
 # 5) OpenAI Whisper API
@@ -21,7 +21,7 @@ if [[ -f "$SYNTHETIC" ]]; then
     exit 0
 fi
 
-# Prefer the radish-managed local Whisper API when available.
+# Prefer the local Whisper API when available.
 if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
     if curl -sf --max-time 5 "${WHISPER_API_BASE}/health" >/dev/null 2>&1; then
         transcript_json="$(mktemp -t apple-voice-assistant-whisper.XXXXXX.json)"

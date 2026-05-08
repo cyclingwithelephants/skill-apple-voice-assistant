@@ -8,7 +8,7 @@ STATE_DIR: `~/.local/state/apple-voice-assistant`
 
 ## Non-negotiable confirmation requirement
 
-Adam wants a Matrix confirmation/audit message every time a voice memo is processed, regardless of category or whether the action succeeded, failed, or only created a draft. Send it to `matrix:!nSlDhIlsFlFubTCaWO:matrix.adamland.xyz`. If Matrix delivery fails, append a FOLLOW-UP line to `~/.local/state/apple-voice-assistant/TODO.md` with enough detail to replay the missed confirmation later.
+The user wants a Matrix confirmation/audit message every time a voice memo is processed, regardless of category or whether the action succeeded, failed, or only created a draft. Send it to the audit target configured in `APPLE_VOICE_ASSISTANT_AUDIT_TARGET`. If Matrix delivery fails, append a FOLLOW-UP line to `~/.local/state/apple-voice-assistant/TODO.md` with enough detail to replay the missed confirmation later.
 
 ## Step 1: Interpret destination
 

@@ -2,26 +2,26 @@
 
 An [Hermes](https://Hermes.ai) skill that turns iPhone voice memos into actions.
 
-Record a memo on your phone. iCloud syncs it to your Mac mini. A deterministic Python watcher transcribes it, archives it, and fires a webhook to the Hermes gateway. Hermes classifies the intent and either does the thing, asks you about it, or files it for later — reporting back via Matrix.
+Record a memo on your phone. iCloud syncs it to your Mac. A deterministic Python watcher transcribes it, archives it, and fires a webhook to the Hermes gateway. Hermes classifies the intent and either does the thing, asks you about it, or files it for later — reporting back via Matrix.
 
 ## What it does
 
 Each new `.m4a` in your Voice Memos iCloud sync dir is classified into one of twelve states, each with its own action file:
 
-| State                    | Action                                                                 |
-| ------------------------ | ---------------------------------------------------------------------- |
-| `EXTERNAL_MESSAGE_DRAFT` | Draft a message/reply; never send without explicit confirmation        |
-| `REMINDER_OR_ALARM`      | Create a reminder/alarm/list item and log fallback state               |
-| `QUESTION_ANSWER`        | Answer a factual/how-to/explanatory question directly                  |
-| `IMPLEMENTATION_TASK`    | Build/change/test something now, then report                           |
-| `PLANNING_REQUEST`       | Produce a project plan/approach/design                                 |
-| `INSTRUCTION_DIRECT`     | Legacy/general direct instruction not covered by a narrower state      |
-| `INSTRUCTION`            | Record a rule proposal in `PROPOSALS.md` with a suggested patch        |
-| `TODO`                   | Legacy/general task capture — create an Apple Reminder + log TODO.md   |
-| `MEMORY_NOTE`            | Persist a durable fact to Hermes memory                                |
-| `IDEA_CAPTURE`           | Capture a product/project/creative idea in memory                      |
-| `RESEARCH_REQUEST`       | File a research task; do not act immediately                           |
-| `UNKNOWN`                | Message the user for clarification                                     |
+| State                    | Action                                                               |
+| ------------------------ | -------------------------------------------------------------------- |
+| `EXTERNAL_MESSAGE_DRAFT` | Draft a message/reply; never send without explicit confirmation      |
+| `REMINDER_OR_ALARM`      | Create a reminder/alarm/list item and log fallback state             |
+| `QUESTION_ANSWER`        | Answer a factual/how-to/explanatory question directly                |
+| `IMPLEMENTATION_TASK`    | Build/change/test something now, then report                         |
+| `PLANNING_REQUEST`       | Produce a project plan/approach/design                               |
+| `INSTRUCTION_DIRECT`     | Legacy/general direct instruction not covered by a narrower state    |
+| `INSTRUCTION`            | Record a rule proposal in `PROPOSALS.md` with a suggested patch      |
+| `TODO`                   | Legacy/general task capture — create an Apple Reminder + log TODO.md |
+| `MEMORY_NOTE`            | Persist a durable fact to Hermes memory                              |
+| `IDEA_CAPTURE`           | Capture a product/project/creative idea in memory                    |
+| `RESEARCH_REQUEST`       | File a research task; do not act immediately                         |
+| `UNKNOWN`                | Message the user for clarification                                   |
 
 Every classification also carries a **confidence level** (`high`/`medium`/`low`). Low-confidence classifications never trigger external or irreversible actions.
 
@@ -47,7 +47,7 @@ iPhone Voice Memos.app
 iCloud sync
         │
         ▼
-Mac mini: ~/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/
+Mac: ~/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/
         │   launchd WatchPaths fires
         ▼
 scripts/process-memo.py                          ← deterministic, no LLM
@@ -75,20 +75,19 @@ Two decoupled components:
 - Local Whisper API running at `http://127.0.0.1:9099` (for transcription)
 - Messaging channel configured in Hermes — the skill reports back via Matrix
 - Voice Memos signed into the same iCloud account as your iPhone, with iCloud sync enabled (System Settings → Apple ID → iCloud → Voice Memos)
-- Mac mini stays awake, or is set to wake for network access
+- Mac stays awake, or is set to wake for network access
 
 ## Install
 
-On `radish`, do not run the installer. This repo vendors the skill under
-`skills/apple/apple-voice-assistant/`; nix-darwin symlinks it into
-`~/.hermes/skills/apple/apple-voice-assistant` and declares the launchd daemons
-from `hosts/radish/configuration.nix`. After a rebuild, register the webhook:
+### Option A: nix-darwin (declarative)
+
+This repo exports a nix-darwin module via `flake.nix`. Add it to your flake inputs, import `darwinModules.apple-voice-assistant`, and enable the service in your host configuration. After a rebuild, register the webhook:
 
 ```bash
 bash ~/.hermes/skills/apple/apple-voice-assistant/scripts/setup-webhook.sh
 ```
 
-For non-Nix macOS hosts:
+### Option B: manual (any macOS host)
 
 ```bash
 git clone https://github.com/cyclingwithelephants/skill-apple-voice-assistant.git

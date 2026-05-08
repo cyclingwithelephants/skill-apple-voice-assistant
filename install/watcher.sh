@@ -33,7 +33,7 @@ HERMES_TOOLSETS="file,terminal,messaging,memory,todo"
 PYTHON_BIN="${APPLE_VOICE_ASSISTANT_PYTHON:-${HERMES_HOME}/hermes-agent/venv/bin/python}"
 SELF_CHECK_MODE="${APPLE_VOICE_ASSISTANT_SELF_CHECK:-0}"
 
-# Require timeout(1) from coreutils. On radish, nix-darwin provides it.
+# Require timeout(1) from coreutils (nix-darwin provides it; on Homebrew: `brew install coreutils`).
 if command -v timeout >/dev/null 2>&1; then
   TIMEOUT_BIN="$(command -v timeout)"
 elif command -v gtimeout >/dev/null 2>&1; then
@@ -222,10 +222,10 @@ for i in "${!new_memos[@]}"; do
 
   # Hand off to Hermes with a timeout. Don't pass --provider or --model;
   # Hermes uses its config.yaml defaults + fallback_providers chain
-  # (openrouter → llama-local/qwen3.6-35b → mlx-radish-local/4B).
+  # Hermes uses its config.yaml defaults + fallback_providers chain.
   prompt=$'new voice memo at `'
   prompt+="${handoff_path}"
-  prompt+=$'`\n\nProcess it with apple-voice-assistant. At the audit step, you MUST send the audit summary to Matrix room !nSlDhIlsFlFubTCaWO:matrix.adamland.xyz using target `matrix:!nSlDhIlsFlFubTCaWO:matrix.adamland.xyz`. If the messaging tool is not available or the send fails, you MUST append a follow-up item to `'"${STATE_DIR}"$'/TODO.md` (see Step 6 in SKILL.md for the exact format). Do NOT silently skip the audit — either deliver it or record the failure.'
+  prompt+=$'`\n\nProcess it with apple-voice-assistant. At the audit step, you MUST send the audit summary to the Matrix room configured in APPLE_VOICE_ASSISTANT_AUDIT_TARGET (`'"${APPLE_VOICE_ASSISTANT_AUDIT_TARGET:-not set}"$'`). If the messaging tool is not available or the send fails, you MUST append a follow-up item to `'"${STATE_DIR}"$'/TODO.md` (see Step 6 in SKILL.md for the exact format). Do NOT silently skip the audit — either deliver it or record the failure.'
 
   handoff_ok=0
   for attempt in 1 2 3; do

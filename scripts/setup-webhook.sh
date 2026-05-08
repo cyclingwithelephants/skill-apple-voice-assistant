@@ -13,6 +13,9 @@ STATE_DIR="${HOME}/.local/state/apple-voice-assistant"
 ENV_FILE="${STATE_DIR}/env"
 HERMES="${HERMES_HOME}/hermes-agent/venv/bin/python ${HERMES_HOME}/hermes-agent/hermes"
 
+# Audit target — must be set (e.g. matrix:!roomid:server.example.com)
+: "${APPLE_VOICE_ASSISTANT_AUDIT_TARGET:?Set APPLE_VOICE_ASSISTANT_AUDIT_TARGET to your Matrix room target (e.g. matrix:!roomid:server.example.com)}"
+
 # Remove existing subscription (ignore errors if it doesn't exist)
 $HERMES webhook remove voice-memo 2>/dev/null || true
 
@@ -32,7 +35,7 @@ Transcript:
 Follow SKILL.md. Classify the transcript (Step 2), then STOP and read references/action_<STATE>.md where STATE is your classification. Follow that file step-by-step.' \
   --skills apple-voice-assistant \
   --deliver matrix \
-  --deliver-chat-id '!nSlDhIlsFlFubTCaWO:matrix.adamland.xyz' \
+  --deliver-chat-id "${APPLE_VOICE_ASSISTANT_AUDIT_TARGET#matrix:}" \
   --description 'Process voice memos: classify transcript, act per skill, audit to Matrix' 2>&1)
 
 echo "$output"
