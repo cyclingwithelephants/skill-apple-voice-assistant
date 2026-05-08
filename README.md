@@ -70,7 +70,7 @@ Two decoupled components:
 
 ## Prerequisites
 
-- macOS (tested on Apple Silicon; should work on Intel)
+- macOS
 - [Hermes](https://Hermes.ai) installed and onboarded (`Hermes onboard`)
 - Local Whisper API running at `http://127.0.0.1:9099` (for transcription)
 - Messaging channel configured in Hermes — the skill reports back via Matrix
