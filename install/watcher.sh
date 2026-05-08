@@ -56,37 +56,21 @@ pick_handoff_provider() {
     return 0
   fi
 
-  if "${PYTHON_BIN}" - "${HERMES_HOME}/auth.json" <<'PY' >/dev/null 2>&1
-import json
-import sys
+  "${PYTHON_BIN}" - "${HERMES_HOME}/auth.json" <<'PY' 2>/dev/null && return 0
+import json, sys
 from pathlib import Path
 
 auth = json.loads(Path(sys.argv[1]).read_text())
 providers = auth.get("providers", {})
 pool = auth.get("credential_pool", {})
 
-has_codex = bool(providers.get("openai-codex")) or bool(pool.get("openai-codex"))
-sys.exit(0 if has_codex else 1)
+if providers.get("openai-codex") or pool.get("openai-codex"):
+    print("openai-codex\tgpt-5.5")
+elif pool.get("openrouter"):
+    print("openrouter\tgoogle/gemini-2.5-flash-preview:free")
+else:
+    print("llama-local\tqwen3.6-35b-a3b")
 PY
-  then
-    printf '%s\t%s\n' "openai-codex" "gpt-5.5"
-    return 0
-  fi
-
-  if "${PYTHON_BIN}" - "${HERMES_HOME}/auth.json" <<'PY' >/dev/null 2>&1
-import json
-import sys
-from pathlib import Path
-
-auth = json.loads(Path(sys.argv[1]).read_text())
-pool = auth.get("credential_pool", {})
-has_openrouter = bool(pool.get("openrouter"))
-sys.exit(0 if has_openrouter else 1)
-PY
-  then
-    printf '%s\t%s\n' "openrouter" "google/gemini-2.5-flash-preview:free"
-    return 0
-  fi
 
   printf '%s\t%s\n' "llama-local" "qwen3.6-35b-a3b"
 }

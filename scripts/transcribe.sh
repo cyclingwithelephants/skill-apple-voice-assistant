@@ -57,12 +57,7 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
 fi
 
 # Try mlx-whisper (Apple Silicon GPU-accelerated, large-v3-turbo)
-if [[ -n "$PYTHON_BIN" ]] && "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
-import importlib.util, sys
-sys.exit(0 if importlib.util.find_spec('mlx_whisper') else 1)
-PY
-then
-    if "$PYTHON_BIN" - "$AUDIO_FILE" "$OUTPUT_FILE" <<'PY'
+if [[ -n "$PYTHON_BIN" ]] && "$PYTHON_BIN" - "$AUDIO_FILE" "$OUTPUT_FILE" <<'PY' 2>/dev/null
 import sys
 import mlx_whisper
 
@@ -80,19 +75,13 @@ with open(out_file, 'w', encoding='utf-8') as f:
 lang = result.get('language', 'unknown')
 print(f'mlx-whisper large-v3-turbo lang={lang}', file=sys.stderr)
 PY
-    then
-        echo "Transcribed using mlx-whisper (large-v3-turbo, M4 GPU)" >&2
-        exit 0
-    fi
+then
+    echo "Transcribed using mlx-whisper (large-v3-turbo, M4 GPU)" >&2
+    exit 0
 fi
 
 # Fallback: faster-whisper (CPU)
-if [[ -n "$PYTHON_BIN" ]] && "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
-import importlib.util, sys
-sys.exit(0 if importlib.util.find_spec('faster_whisper') else 1)
-PY
-then
-    if "$PYTHON_BIN" - "$AUDIO_FILE" "$OUTPUT_FILE" <<'PY'
+if [[ -n "$PYTHON_BIN" ]] && "$PYTHON_BIN" - "$AUDIO_FILE" "$OUTPUT_FILE" <<'PY' 2>/dev/null
 import sys
 from faster_whisper import WhisperModel
 
@@ -107,10 +96,9 @@ with open(out_file, 'w', encoding='utf-8') as f:
     f.write(text + '\n')
 print(f'{info.language}:{info.language_probability:.3f}', file=sys.stderr)
 PY
-    then
-        echo "Transcribed using faster-whisper" >&2
-        exit 0
-    fi
+then
+    echo "Transcribed using faster-whisper" >&2
+    exit 0
 fi
 
 # Try OpenAI Whisper API
