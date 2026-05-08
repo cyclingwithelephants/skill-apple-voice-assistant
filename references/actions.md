@@ -57,7 +57,7 @@ Do two things:
 - A suggested example row for `references/classification-examples.md`
 - Why this was ambiguous and what would make it clear
 
-## `TODO_ADAM`
+## `TODO`
 
 Create an Apple Reminder in the user's default Reminders list (the list Siri uses — don't specify a list name). Use `osascript` with AppleScript:
 

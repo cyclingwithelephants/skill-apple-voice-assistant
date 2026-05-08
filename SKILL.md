@@ -40,19 +40,19 @@ Assign exactly one **state** and one **confidence level**.
 
 ### States
 
-| State                | Meaning                                                                |
-| -------------------- | ---------------------------------------------------------------------- |
+| State                    | Meaning                                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | `EXTERNAL_MESSAGE_DRAFT` | User wants a message/reply drafted for another person or external channel; never send without explicit confirmation |
 | `REMINDER_OR_ALARM`      | Time-sensitive reminder/alarm/shopping-list item; create Apple Reminder/List item and log fallback state            |
-| `QUESTION_ANSWER`        | User asks a factual/how-to/explanatory question; answer directly and archive                                         |
-| `IMPLEMENTATION_TASK`    | User asks you to build/change/test something now; implement or create concrete artifact, then report                 |
+| `QUESTION_ANSWER`        | User asks a factual/how-to/explanatory question; answer directly and archive                                        |
+| `IMPLEMENTATION_TASK`    | User asks you to build/change/test something now; implement or create concrete artifact, then report                |
 | `PLANNING_REQUEST`       | User asks for a project plan/approach/design, not immediate implementation                                          |
 | `INSTRUCTION_DIRECT`     | Legacy/general direct instruction not covered by a narrower state                                                   |
 | `INSTRUCTION`            | User is teaching a new rule, pattern, or example for this skill itself                                              |
 | `TODO`                   | Legacy/general task capture — create an Apple Reminder and log to TODO.md                                           |
 | `MEMORY_NOTE`            | A fact to persist — about a person, project, system, or preference                                                  |
 | `IDEA_CAPTURE`           | A product, project, or creative idea to capture in memory                                                           |
-| `RESEARCH_REQUEST`       | "Look into X" — create a research task, do NOT act immediately                                                     |
+| `RESEARCH_REQUEST`       | "Look into X" — create a research task, do NOT act immediately                                                      |
 | `UNKNOWN`                | No clear intent or ambiguous instruction — message the user                                                         |
 
 `UNKNOWN` is the catch-all. Use it when intent is genuinely unclear, when a memo sounds like an instruction but scope or meaning is ambiguous, or when confidence is too low to act. Always message the user for clarification. Classify into a specific state whenever possible.
@@ -120,7 +120,7 @@ Read that file NOW. Follow its numbered steps. Do NOT skip any step. When the fi
 
 ## Intake status report workflow
 
-Use this when Adam asks for a status report, summary, audit, or "what's actionable" view of voice memo intake.
+Use this when the user asks for a status report, summary, audit, or "what's actionable" view of voice memo intake.
 
 1. Inspect live state, do not answer from memory:
    - `~/.local/state/apple-voice-assistant/data/**/*.md` for archived transcripts, frontmatter category/confidence/type/action_taken, and archive paths
@@ -146,13 +146,13 @@ Use this when Adam asks for a status report, summary, audit, or "what's actionab
 
 ## Operational notes
 
-- **User confirmation requirement.** Adam wants a Matrix confirmation/audit message every time a voice memo is processed, regardless of category or whether the action succeeded, failed, or only created a draft. Use `matrix:!nSlDhIlsFlFubTCaWO:matrix.adamland.xyz`. If Matrix delivery fails, append a FOLLOW-UP line to `~/.local/state/apple-voice-assistant/TODO.md` with enough detail to replay the missed confirmation later.
+- **User confirmation requirement.** The user wants a Matrix confirmation/audit message every time a voice memo is processed, regardless of category or whether the action succeeded, failed, or only created a draft. Use the audit target configured via `APPLE_VOICE_ASSISTANT_AUDIT_TARGET` (set in `~/.local/state/apple-voice-assistant/env` or passed via the webhook subscription's `--deliver-chat-id`). If Matrix delivery fails, append a FOLLOW-UP line to `~/.local/state/apple-voice-assistant/TODO.md` with enough detail to replay the missed confirmation later.
 - **Two-component architecture.** The Python watcher (`scripts/process-memo.py`) runs as a launchd daemon, handles all I/O (discovery, transcription, archiving), and POSTs to the Hermes webhook. You receive the webhook payload and handle classification, action dispatch, and audit.
 - The watcher runs as a LaunchDaemon (starts at boot, before login) — it only does file I/O and webhook POSTs, no GUI access needed. It needs `HOME` set and a `PATH` that includes `/run/current-system/sw/bin`.
 - Voice Memos TCC access: the watcher uses the Hermes venv Python interpreter to enumerate the protected Voice Memos directory, then copies files to `~/.local/state/apple-voice-assistant/tmp-audio/` before processing.
 - Hermes model selection is controlled by `~/.hermes/config.yaml` (default model + `fallback_providers` chain), not by the watcher or webhook config.
 - The webhook subscription is registered by `scripts/setup-webhook.sh`. Run it once after deploying, or re-run when the prompt template changes. Subscriptions persist across gateway restarts.
-- For Matrix audit delivery, use the explicit target `matrix:!nSlDhIlsFlFubTCaWO:matrix.adamland.xyz`.
+- For Matrix audit delivery, use the target configured in `APPLE_VOICE_ASSISTANT_AUDIT_TARGET`.
 
 ## End-to-end verification recipe
 

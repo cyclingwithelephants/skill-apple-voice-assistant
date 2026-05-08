@@ -13,6 +13,17 @@ This skill is designed to discover new use cases and evolve its own classificati
 
 When working on this skill, preserve and strengthen this feedback loop. Don't hardcode behaviour that should be learned. Prefer adding classification examples over adding code branches. The goal is an agent that gets better at understanding its user over time without code changes.
 
+## Core design principle: public-repo generality
+
+This is a public, open-source repository. All documentation, code comments, scripts, and skill specs must be written for a general audience — not for a specific machine, user, or deployment.
+
+- **No hardcoded hostnames, usernames, or room IDs.** Use environment variables (`APPLE_VOICE_ASSISTANT_AUDIT_TARGET`, etc.) for anything deployment-specific. The `env` file and webhook registration script are the right places for instance-specific config.
+- **No machine-specific references.** Say "your Mac", not "Mac mini" or a specific hostname. Install instructions should work on any macOS machine, not just one.
+- **"The user", not a name.** Skill specs and action files describe behaviour for whoever deploys the skill.
+- **Nix-darwin examples stay generic.** Reference the module interface (`darwinModules.apple-voice-assistant`), not a specific consuming flake or host config path.
+
+When adding new docs or modifying existing ones, check that nothing leaks a specific deployment's identity into the public repo.
+
 ## Architecture
 
 ```
@@ -88,7 +99,7 @@ shellcheck install/watcher.sh install/healthcheck.sh install/install.sh scripts/
 # Validate Nix flake
 nix flake check --no-build
 
-# Check nix-darwin module builds (requires a consuming flake, e.g. lab-radish)
+# Check nix-darwin module builds (requires a consuming flake)
 # nix build .#darwinConfigurations.<host>.system --no-link
 
 # End-to-end test: place a synthetic .m4a in the recordings dir and watch logs

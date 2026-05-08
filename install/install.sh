@@ -128,7 +128,7 @@ Install complete.
   logs:      ${STATE_DIR}/watcher.log
              ${STATE_DIR}/launchd.{out,err}.log
 
-Record a new voice memo on your iPhone — it should sync to the Mac mini and fire Hermes.
+Record a new voice memo on your iPhone — it should sync to your Mac and fire Hermes.
 You can tail the watcher log to confirm:
 
   tail -f "${STATE_DIR}/watcher.log"
